@@ -129,9 +129,10 @@ Configuration (environment variables, set in `app.yaml` for App Engine):
 | Variable | Purpose |
 |---|---|
 | `BUCKETCAST_BUCKET` | Cloud Storage bucket name. If unset, uses local storage in `BUCKETCAST_LOCAL_DIR` (default `.local-bucket`). |
+| `BUCKETCAST_ROLE` | Which half of the app to serve: `public`, `admin`, or `all` (default; both, for local development). |
 | `BUCKETCAST_IAP_AUDIENCE` | IAP audience (`/projects/<number>/apps/<project-id>`). Admin is locked until this is set. |
-| `BUCKETCAST_ADMIN_EMAILS` | Optional comma-separated allow-list of admin Google accounts. |
-| `BUCKETCAST_DEV_AUTH_BYPASS` | `1` to skip admin auth. **Local development only.** |
+| `BUCKETCAST_ADMIN_EMAILS` | Comma-separated Google accounts allowed to administer. **Required**: admin is locked until at least one is listed. |
+| `BUCKETCAST_DEV_AUTH_BYPASS` | `1` to skip admin auth. **Local development only**; ignored on Google Cloud. |
 | `BUCKETCAST_STATS_BQ_TABLE` | BigQuery table the download-log sink writes to, as `project.dataset.table`. If unset, stats use a local file in `BUCKETCAST_STATS_LOCAL_DIR` (default `.local-stats`). |
 | `BUCKETCAST_PUBLIC_BASE_URL` | Base for media URLs in the feed when using local storage. Also the base of the download-counting links for shows without a custom domain, so on Google Cloud set it to the public service's URL. Defaults to the address you opened the admin at. |
 
@@ -198,6 +199,32 @@ Two settings in the show's form control the layout:
 
 Links between the generated files are relative, so the same files work at the
 show's own domain and straight from the bucket.
+
+## Admin access
+
+In production the app runs as **two App Engine services from the same code**:
+
+| Service | Config | Serves | Login |
+|---|---|---|---|
+| `default` (public) | `app.yaml` | show pages, feeds, download redirect | none |
+| `admin` | `admin.yaml` | `/admin` | Google sign-in through IAP |
+
+Identity-Aware Proxy protects whole services, not URL paths, so the admin is
+its own service instead of a path on the public one. Each service only
+registers its own routes: the public service has no admin code paths to
+reach, and the admin service has no public ones.
+
+Three checks guard the admin, and all must pass:
+
+1. **IAP** requires a Google sign-in before a request reaches the app.
+2. **The app verifies IAP's signed token** on every admin request, so a
+   request that gets around IAP is refused.
+3. **The signed-in account must be in `BUCKETCAST_ADMIN_EMAILS`.** The list
+   is required. With it empty the admin refuses everyone, so a mistake in
+   IAP's own access settings can't let in every Google account.
+
+A fresh deploy with nothing configured is locked. `BUCKETCAST_DEV_AUTH_BYPASS`
+skips all of this for local development and is ignored on Google Cloud.
 
 ## Custom domains
 

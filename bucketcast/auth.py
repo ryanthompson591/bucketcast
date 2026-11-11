@@ -4,16 +4,22 @@ In production, /admin sits behind Google Identity-Aware Proxy (IAP). As
 defense in depth the app also verifies IAP's signed JWT on every admin request
 and, if ``ADMIN_EMAILS`` is set, checks the signed-in account against it.
 
-The app is secure by default: if IAP isn't configured (no ``IAP_AUDIENCE``)
-and the dev bypass isn't on, admin requests are refused.
+The app is secure by default. Admin requests are refused unless IAP is
+configured (``IAP_AUDIENCE``) *and* at least one admin account is listed
+(``ADMIN_EMAILS``). The allow-list is required, not optional, so a mistake in
+IAP's own access settings can't open the admin to every Google account.
+
+The dev bypass only works off Google Cloud: on App Engine it is ignored.
 
 Config:
   IAP_AUDIENCE      "/projects/<project-number>/apps/<project-id>" for App Engine
-  ADMIN_EMAILS      optional comma-separated allow-list
+  ADMIN_EMAILS      comma-separated Google accounts allowed to administer
   DEV_AUTH_BYPASS   "1" to skip auth for local development only
 """
 
 from __future__ import annotations
+
+import os
 
 from flask import abort, current_app, g, request
 
@@ -35,16 +41,34 @@ def verify_iap_jwt(token: str, audience: str) -> str:
     return email.lower()
 
 
+def on_google_cloud() -> bool:
+    """True when running on App Engine (or Cloud Run), judged by its own env vars."""
+    return any(os.environ.get(name) for name in ("GAE_ENV", "GAE_APPLICATION", "K_SERVICE"))
+
+
+def bypass_enabled(config) -> bool:
+    """The dev bypass, which a deployed app never honours."""
+    return bool(config.get("DEV_AUTH_BYPASS")) and not on_google_cloud()
+
+
 def require_admin() -> None:
     cfg = current_app.config
     if cfg.get("DEV_AUTH_BYPASS"):
-        g.admin_email = "dev@localhost"
-        return
+        if not on_google_cloud():
+            g.admin_email = "dev@localhost"
+            return
+        current_app.logger.error(
+            "BUCKETCAST_DEV_AUTH_BYPASS is set on a deployed app and is being ignored. "
+            "Remove it from the service's configuration.")
 
     audience = cfg.get("IAP_AUDIENCE")
     if not audience:
         abort(403, "Admin is locked: IAP_AUDIENCE is not configured. "
                    "Set DEV_AUTH_BYPASS=1 for local development.")
+    allowed = cfg.get("ADMIN_EMAILS") or []
+    if not allowed:
+        abort(403, "Admin is locked: ADMIN_EMAILS is not configured. "
+                   "List the Google accounts allowed to administer Bucketcast.")
     token = request.headers.get(IAP_JWT_HEADER)
     if not token:
         abort(401, "Missing IAP assertion.")
@@ -54,7 +78,7 @@ def require_admin() -> None:
         current_app.logger.warning("IAP JWT verification failed", exc_info=True)
         abort(401, "Invalid IAP assertion.")
 
-    allowed = cfg.get("ADMIN_EMAILS") or []
-    if allowed and email not in allowed:
+    if email not in allowed:
+        current_app.logger.warning("Admin access refused for %s", email)
         abort(403, "This account is not allowed to administer Bucketcast.")
     g.admin_email = email

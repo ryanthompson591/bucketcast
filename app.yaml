@@ -1,3 +1,8 @@
+# The PUBLIC service (App Engine's "default" service).
+#
+# Serves show pages, feeds and the download-counting redirect to listeners and
+# podcast apps. It contains no admin routes. Custom domains map to this service.
+# The admin runs as a second service from the same code: see admin.yaml.
 runtime: python313
 # Scales to zero when idle; F1 is the smallest (free-tier) instance class.
 instance_class: F1
@@ -6,11 +11,10 @@ automatic_scaling:
   max_instances: 2
 
 env_variables:
+  BUCKETCAST_ROLE: "public"
   BUCKETCAST_BUCKET: "your-bucket-name"
-  # From IAP settings: /projects/<project-number>/apps/<project-id>
-  BUCKETCAST_IAP_AUDIENCE: ""
-  # Optional allow-list, comma separated
-  BUCKETCAST_ADMIN_EMAILS: ""
+  # Optional: the BigQuery table the download-log sink writes to.
+  BUCKETCAST_STATS_BQ_TABLE: ""
 
 handlers:
   - url: /.*
