@@ -1,17 +1,22 @@
 """Public endpoints: the ones listeners and podcast apps reach, with no login.
 
-For now that is only the download-tracking redirect. It never serves audio:
-it records the request and sends the app on to the file in the bucket.
+* **Show sites by domain.** Many custom domains point at this one app. The
+  request's ``Host`` header picks the show, and its page and feed are served
+  from the static files in the bucket (``/``, ``/page/<n>/``, ``/feed.xml``).
+* **Download counting.** ``/e/<show>/<episode>.<ext>`` records the request
+  and redirects to the audio file. It never serves audio itself.
 """
 
 from __future__ import annotations
 
 import time
 
-from flask import Blueprint, abort, current_app, redirect, request
+from flask import Blueprint, Response, abort, current_app, redirect, request
 
-from .episodes import AUDIO_TYPES, EPISODE_ID_RE
+from .episodes import EPISODE_ID_RE
+from .feed import FEED_CACHE_CONTROL, FEED_CONTENT_TYPE, feed_path
 from .shows import ID_RE
+from .site import SITE_CACHE_CONTROL, SITE_CONTENT_TYPE, page_path
 from .stats import DownloadEvent, hash_ip, load_salt
 
 bp = Blueprint("public", __name__)
@@ -19,12 +24,6 @@ bp = Blueprint("public", __name__)
 # Downloads come in bursts, so remember each show's episode -> audio file map
 # briefly instead of reading episodes.json from the bucket on every request.
 EPISODE_CACHE_SECONDS = 60
-
-
-def tracking_path(show_id: str, episode_id: str, audio_path: str) -> str:
-    """The app-relative URL that counts a download of this episode."""
-    ext = audio_path.rsplit(".", 1)[-1].lower() if "." in audio_path else "mp3"
-    return f"/e/{show_id}/{episode_id}.{ext if ext in AUDIO_TYPES else 'mp3'}"
 
 
 EPISODE_CACHE_MIN_SECONDS = 5
@@ -49,6 +48,81 @@ def _audio_paths(show_id: str, episode_id: str) -> dict[str, str]:
     cache[show_id] = (now, paths)
     return paths
 
+
+# --- show sites by domain ----------------------------------------------------
+
+# How long the domain -> show map is kept before show.json files are re-read.
+DOMAIN_CACHE_SECONDS = 60
+
+NO_SHOW_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>No podcast here</title>
+<style>body{font:17px/1.6 system-ui,sans-serif;max-width:560px;margin:15vh auto;padding:0 20px;
+color:#1d1d1f}p{color:#6e6e73}</style></head>
+<body><h1>No podcast here</h1>
+<p>No show is set up at this address. If you followed a link, it may be out of date.</p>
+</body></html>
+"""
+
+
+def normalize_host(host: str) -> str:
+    """``Host`` header to a bare lowercase domain: no port, trailing dot or ``www.``."""
+    host = (host or "").strip().lower()
+    if host.startswith("["):  # IPv6 literal
+        return host
+    host = host.rsplit(":", 1)[0].rstrip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
+def _domain_map() -> dict[str, str]:
+    ext = current_app.extensions
+    hit = ext.get("bucketcast.domain_cache")
+    now = time.monotonic()
+    if hit and now - hit[0] < DOMAIN_CACHE_SECONDS:
+        return hit[1]
+    domains = {normalize_host(s.domain): s.id
+               for s in ext["bucketcast.shows"].list() if s.domain}
+    ext["bucketcast.domain_cache"] = (now, domains)
+    return domains
+
+
+def show_for_host(host: str) -> str | None:
+    """The ID of the show whose custom domain matches this ``Host``, if any."""
+    return _domain_map().get(normalize_host(host))
+
+
+def _serve(path_for_show, content_type: str, cache_control: str) -> Response:
+    show_id = show_for_host(request.host)
+    body = None
+    if show_id:
+        body = current_app.extensions["bucketcast.storage"].read_bytes(path_for_show(show_id))
+    if body is None:
+        return Response(NO_SHOW_PAGE, status=404, content_type=SITE_CONTENT_TYPE)
+    return Response(body, content_type=content_type, headers={"Cache-Control": cache_control})
+
+
+@bp.get("/")
+@bp.get("/index.html")
+def site_home():
+    return _serve(lambda show_id: page_path(show_id, 1), SITE_CONTENT_TYPE, SITE_CACHE_CONTROL)
+
+
+@bp.get("/page/<int:number>/")
+@bp.get("/page/<int:number>/index.html")
+def site_page(number):
+    if number < 1:
+        abort(404)
+    return _serve(lambda show_id: page_path(show_id, number), SITE_CONTENT_TYPE,
+                  SITE_CACHE_CONTROL)
+
+
+@bp.get("/feed.xml")
+def site_feed():
+    return _serve(feed_path, FEED_CONTENT_TYPE, FEED_CACHE_CONTROL)
+
+
+# --- download counting -------------------------------------------------------
 
 def _salt() -> str:
     ext = current_app.extensions

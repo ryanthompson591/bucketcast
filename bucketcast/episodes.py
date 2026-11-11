@@ -47,6 +47,12 @@ def audio_type_for(filename: str) -> str | None:
     return AUDIO_TYPES.get(ext)
 
 
+def tracking_path(show_id: str, episode_id: str, audio_path: str) -> str:
+    """The app-relative URL that counts a download of this episode."""
+    ext = audio_path.rsplit(".", 1)[-1].lower() if "." in audio_path else "mp3"
+    return f"/e/{show_id}/{episode_id}.{ext if ext in AUDIO_TYPES else 'mp3'}"
+
+
 def new_audio_path(show_id: str, filename: str) -> str:
     """A unique, URL-safe object name for an uploaded audio file."""
     stem, _, ext = filename.rpartition(".")

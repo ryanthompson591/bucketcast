@@ -17,9 +17,8 @@ from datetime import UTC, datetime
 from email.utils import format_datetime
 
 from .assets import AssetRepository
-from .episodes import Episode, EpisodeRepository
+from .episodes import Episode, EpisodeRepository, tracking_path
 from .notes import render_notes
-from .public import tracking_path
 from .shows import SHOWS_PREFIX, Show, ShowRepository
 from .storage import Storage
 
