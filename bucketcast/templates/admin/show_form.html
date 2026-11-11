@@ -80,6 +80,12 @@
     <label for="explicit">Explicit content</label>
   </div>
 
+  <div class="field check">
+    <input type="checkbox" id="track_downloads" name="track_downloads" {% if show.track_downloads %}checked{% endif %}>
+    <label for="track_downloads">Count downloads</label>
+    <div class="muted">Sends the feed's audio links through this app so each download can be counted, then on to the file. Leave off to link straight to the bucket.</div>
+  </div>
+
   <div class="field">
     <label for="artwork">Artwork</label>
     {% if show.artwork_path %}

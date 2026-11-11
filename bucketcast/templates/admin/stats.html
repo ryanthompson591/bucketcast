@@ -1,0 +1,127 @@
+{% extends "admin/base.html" %}
+{% block title %}Stats · {{ show.title }} · Bucketcast{% endblock %}
+{% block content %}
+<div class="muted">
+  <a href="{{ url_for('admin.index') }}">Shows</a> ›
+  <a href="{{ url_for('admin.list_episodes', show_id=show.id) }}">{{ show.title }}</a>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+  <h1>Downloads</h1>
+  <nav class="ranges" aria-label="Time range">
+    {% for key, label in [("7", "7 days"), ("30", "30 days"), ("90", "90 days"), ("all", "All time")] %}
+      <a href="{{ url_for('admin.show_stats', show_id=show.id, range=key) }}"
+         class="{{ 'on' if key == range_key }}" {% if key == range_key %}aria-current="true"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+</div>
+
+{% if not show.track_downloads %}
+<div class="notice" style="background:#fff8e1;border-color:#f0dfa0">
+  Download counting is off for this show, so new downloads aren't being recorded.
+  Turn on “Count downloads” in <a href="{{ url_for('admin.edit_show', show_id=show.id) }}">Show settings</a>.
+</div>
+{% endif %}
+{% if error %}<div class="error-box">{{ error }}</div>{% endif %}
+
+{% if summary %}
+{% set period = "All time" if range_key == "all" else "Last " ~ range_key ~ " days" %}
+<div class="tiles">
+  <div class="card tile"><div class="label">{{ period }}</div><div class="value">{{ "{:,}".format(summary.total) }}</div></div>
+  <div class="card tile"><div class="label">Last 7 days</div><div class="value">{{ "{:,}".format(summary.last_7_days) }}</div></div>
+  <div class="card tile"><div class="label">Today (UTC)</div><div class="value">{{ "{:,}".format(summary.today) }}</div></div>
+</div>
+
+<div class="card" style="margin-bottom:14px">
+  <strong>Downloads per day</strong>
+  {% if summary.total %}
+  <div class="chart" id="chart">
+    <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img"
+         aria-label="Bar chart of downloads per day. {{ period }}: {{ summary.total }} downloads, busiest day {{ chart.peak }}.">
+      {% for line in chart.grid %}
+        {% if line.value %}<line class="grid" x1="{{ chart.left }}" x2="{{ chart.right }}" y1="{{ line.y }}" y2="{{ line.y }}"/>{% endif %}
+        <text x="{{ chart.left - 8 }}" y="{{ line.y + 4 }}" text-anchor="end">{{ "{:,}".format(line.value) }}</text>
+      {% endfor %}
+      {% for bar in chart.bars %}
+        <rect class="hit" x="{{ bar.slot_x }}" y="{{ chart.top }}" width="{{ bar.slot_w }}" height="{{ chart.base - chart.top }}"
+              tabindex="0" data-tip="{{ bar.full }}: {{ '{:,}'.format(bar.n) }} download{{ '' if bar.n == 1 else 's' }}"
+              data-x="{{ bar.cx }}" data-y="{{ bar.y }}"><title>{{ bar.full }}: {{ bar.n }}</title></rect>
+        {% if bar.n %}
+        <path class="bar" d="M{{ bar.x }},{{ chart.base }} V{{ bar.y + bar.r }} q0,-{{ bar.r }} {{ bar.r }},-{{ bar.r }} H{{ bar.x + bar.w - bar.r }} q{{ bar.r }},0 {{ bar.r }},{{ bar.r }} V{{ chart.base }} Z"/>
+        {% else %}<path class="bar" d=""/>{% endif %}
+        {% if bar.tick %}<text x="{{ bar.cx }}" y="{{ chart.height - 8 }}" text-anchor="middle">{{ bar.label }}</text>{% endif %}
+      {% endfor %}
+      <line class="axis" x1="{{ chart.left }}" x2="{{ chart.right }}" y1="{{ chart.base }}" y2="{{ chart.base }}"/>
+    </svg>
+    <div class="chart-tip" id="chart-tip" hidden></div>
+  </div>
+  <details style="margin-top:8px">
+    <summary class="muted" style="cursor:pointer">Show as a table</summary>
+    <table class="data">
+      <thead><tr><th>Day</th><th class="num">Downloads</th></tr></thead>
+      <tbody>
+        {% for day, n in summary.by_day|reverse %}<tr><td>{{ day.strftime("%a, %b %d, %Y") }}</td><td class="num">{{ "{:,}".format(n) }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% else %}
+  <p class="muted" style="margin:8px 0 0">No downloads counted in this period yet.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-bottom:14px">
+  <strong>By episode</strong>
+  {% if episode_rows %}
+  <table class="data">
+    <thead><tr><th>Episode</th><th class="num">Downloads</th></tr></thead>
+    <tbody>
+      {% for title, n in episode_rows %}<tr><td>{{ title }}</td><td class="num">{{ "{:,}".format(n) }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="margin:8px 0 0">No episodes yet.</p>{% endif %}
+</div>
+
+<div class="card" style="margin-bottom:14px">
+  <strong>By app</strong>
+  {% if summary.by_app %}
+  <table class="data">
+    <thead><tr><th>App</th><th style="width:40%"><span class="muted" style="font-weight:400">Share</span></th><th class="num">Downloads</th></tr></thead>
+    <tbody>
+      {% for name, n in summary.by_app %}
+      <tr>
+        <td>{{ name }}</td>
+        <td><div class="meter" style="width:{{ (100 * n / summary.by_app[0][1])|round(1) }}%"></div></td>
+        <td class="num">{{ "{:,}".format(n) }} <span class="muted">({{ (100 * n / summary.total)|round|int }}%)</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="margin:8px 0 0">Nothing to show for this period.</p>{% endif %}
+</div>
+{% endif %}
+
+<p class="muted">
+  A download is counted once per listener, app and episode per day (UTC). Bots, partial
+  re-requests and non-download checks are left out. Source: {{ source }}
+</p>
+
+<script>
+(function () {
+  var chart = document.getElementById('chart'), tip = document.getElementById('chart-tip');
+  if (!chart) return;
+  var svg = chart.querySelector('svg');
+  function show(el) {
+    var box = svg.getBoundingClientRect(), scale = box.width / svg.viewBox.baseVal.width;
+    tip.textContent = el.dataset.tip;
+    tip.style.left = (el.dataset.x * scale) + 'px';
+    tip.style.top = Math.max(22, el.dataset.y * scale - 6) + 'px';
+    tip.hidden = false;
+  }
+  chart.querySelectorAll('.hit').forEach(function (el) {
+    el.addEventListener('mouseenter', function () { show(el); });
+    el.addEventListener('focus', function () { show(el); });
+    el.addEventListener('mouseleave', function () { tip.hidden = true; });
+    el.addEventListener('blur', function () { tip.hidden = true; });
+  });
+})();
+</script>
+{% endblock %}

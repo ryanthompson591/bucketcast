@@ -132,7 +132,8 @@ Configuration (environment variables, set in `app.yaml` for App Engine):
 | `BUCKETCAST_IAP_AUDIENCE` | IAP audience (`/projects/<number>/apps/<project-id>`). Admin is locked until this is set. |
 | `BUCKETCAST_ADMIN_EMAILS` | Optional comma-separated allow-list of admin Google accounts. |
 | `BUCKETCAST_DEV_AUTH_BYPASS` | `1` to skip admin auth. **Local development only.** |
-| `BUCKETCAST_PUBLIC_BASE_URL` | Base for media URLs in the feed when using local storage. Defaults to the address you opened the admin at. Not needed with a bucket. |
+| `BUCKETCAST_STATS_BQ_TABLE` | BigQuery table the download-log sink writes to, as `project.dataset.table`. If unset, stats use a local file in `BUCKETCAST_STATS_LOCAL_DIR` (default `.local-stats`). |
+| `BUCKETCAST_PUBLIC_BASE_URL` | Base for media URLs in the feed when using local storage. Also the base of the download-counting links for shows without a custom domain, so on Google Cloud set it to the public service's URL. Defaults to the address you opened the admin at. |
 
 ## Episode uploads
 
@@ -180,6 +181,50 @@ requires (artwork, description, author, owner email).
   episode appears the next time the feed is rebuilt after that date; nothing
   rebuilds it automatically yet.
 - Deleting a show removes its feed.
+
+## Download stats
+
+Optional, per show. With **Count downloads** on in a show's settings, the
+feed's audio links point at `/e/<show-id>/<episode-id>.mp3` on the app. That
+endpoint records the request and redirects to the file in the bucket; the
+audio still never passes through the app. The show's **Stats** page charts
+downloads per day and breaks them down by episode and by app.
+
+A download is counted once per listener, app and episode per UTC day. `HEAD`
+requests, seeks and resumes (range requests that don't start at byte 0), the
+2-byte `bytes=0-1` probe and known bots are left out. Listeners are told
+apart by a salted hash of their IP address; the address itself is not stored.
+Events are kept raw and counted when read, so the rules can change later
+without losing history.
+
+Locally, events go to `.local-stats/downloads.jsonl`. On Google Cloud they go
+to **BigQuery** by way of logging, so BigQuery can never slow down or break a
+download:
+
+1. The endpoint prints one structured log line per request.
+2. A Cloud Logging sink copies those lines into a BigQuery dataset.
+3. The Stats page queries that table.
+
+One-time setup (not yet run against a real project, so check the names as you
+go, in particular the table the sink creates):
+
+```bash
+bq mk --dataset YOUR-PROJECT:bucketcast_logs
+
+gcloud logging sinks create bucketcast-downloads \
+  bigquery.googleapis.com/projects/YOUR-PROJECT/datasets/bucketcast_logs \
+  --log-filter='jsonPayload.event="bucketcast.download"' \
+  --use-partitioned-tables
+```
+
+Then give the sink's writer identity (printed by the command above) the
+*BigQuery Data Editor* role on the dataset, give the app's service account
+*BigQuery Job User* and *BigQuery Data Viewer*, and set
+`BUCKETCAST_STATS_BQ_TABLE` to the table the sink writes to
+(`YOUR-PROJECT.bucketcast_logs.<table>`).
+
+Turning counting on puts the app in the download path: if the app is down,
+downloads fail until it is back, whereas direct bucket links keep working.
 
 ## Show notes and assets
 

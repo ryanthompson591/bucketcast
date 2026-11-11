@@ -19,6 +19,7 @@ from email.utils import format_datetime
 from .assets import AssetRepository
 from .episodes import Episode, EpisodeRepository
 from .notes import render_notes
+from .public import tracking_path
 from .shows import SHOWS_PREFIX, Show, ShowRepository
 from .storage import Storage
 
@@ -116,6 +117,13 @@ class FeedBuilder:
             return f"https://{show.domain}/"
         return self.media_url(f"{SHOWS_PREFIX}/{show.id}/index.html")
 
+    def enclosure_url(self, show: Show, episode: Episode) -> str:
+        """Where podcast apps fetch the audio: the bucket, or the counting redirect."""
+        if not show.track_downloads:
+            return self.media_url(episode.audio_path)
+        base = f"https://{show.domain}" if show.domain else self.base_url
+        return base + tracking_path(show.id, episode.id, episode.audio_path)
+
     def notes_html(self, show_id: str, text: str) -> str:
         return render_notes(text, lambda name: self.absolute(self.assets.url(show_id, name)))
 
@@ -172,7 +180,7 @@ class FeedBuilder:
         _add(item, "guid", episode.guid, isPermaLink="false")
         _add(item, "pubDate", format_datetime(_parse(episode.published_at)))
         _add(item, "link", site)
-        _add(item, "enclosure", url=self.media_url(episode.audio_path),
+        _add(item, "enclosure", url=self.enclosure_url(show, episode),
              length=str(episode.audio_bytes), type=episode.audio_type or "audio/mpeg")
         if notes:
             _add(item, "description", notes)
