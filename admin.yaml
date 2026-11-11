@@ -1,0 +1,31 @@
+# The ADMIN service, reached at https://admin-dot-YOUR-PROJECT.appspot.com
+#
+# Sits behind Identity-Aware Proxy (IAP), which requires a Google sign-in. The
+# app additionally verifies IAP's signed token and checks the account against
+# BUCKETCAST_ADMIN_EMAILS, and stays locked until both settings below are filled
+# in. It contains no public routes. Deploy with: gcloud app deploy admin.yaml
+runtime: python313
+service: admin
+instance_class: F1
+automatic_scaling:
+  min_instances: 0
+  max_instances: 1
+
+env_variables:
+  BUCKETCAST_ROLE: "admin"
+  BUCKETCAST_BUCKET: "your-bucket-name"
+  # From IAP: /projects/<project-number>/apps/<project-id>
+  BUCKETCAST_IAP_AUDIENCE: ""
+  # Required. Comma-separated Google accounts allowed to administer.
+  BUCKETCAST_ADMIN_EMAILS: ""
+  # Where listeners reach the public service, for shows without their own
+  # domain: https://YOUR-PROJECT.appspot.com
+  BUCKETCAST_PUBLIC_BASE_URL: ""
+  # Optional: the BigQuery table the download-log sink writes to.
+  BUCKETCAST_STATS_BQ_TABLE: ""
+  # Never set BUCKETCAST_DEV_AUTH_BYPASS here. A deployed app ignores it.
+
+handlers:
+  - url: /.*
+    script: auto
+    secure: always

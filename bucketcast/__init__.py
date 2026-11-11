@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 
-from flask import Flask, abort, request, send_file
+from flask import Flask, abort, redirect, request, send_file, url_for
 
 from .assets import AssetRepository
 from .auth import require_admin
@@ -32,6 +32,9 @@ def load_config() -> dict:
             if e.strip()
         ],
         "DEV_AUTH_BYPASS": _env_bool("BUCKETCAST_DEV_AUTH_BYPASS"),
+        # Which half of the app this process serves: "admin", "public", or
+        # "all" (both, for local development). See create_app.
+        "ROLE": os.environ.get("BUCKETCAST_ROLE", "all").strip().lower() or "all",
         # Only needed for local development, where media URLs are site-relative.
         "PUBLIC_BASE_URL": os.environ.get("BUCKETCAST_PUBLIC_BASE_URL", ""),
         # Download stats: the BigQuery table the log sink writes to
@@ -43,11 +46,24 @@ def load_config() -> dict:
     }
 
 
+ROLES = ("all", "admin", "public")
+
+
 def create_app(config: dict | None = None, storage=None, stats=None) -> Flask:
+    """Build the app.
+
+    In production it runs as two App Engine services from the same code. The
+    ``public`` service answers listeners and podcast apps and contains no
+    admin routes at all. The ``admin`` service sits behind Identity-Aware
+    Proxy and contains no public ones. Locally, ``all`` serves both.
+    """
     app = Flask(__name__)
     app.config.update(load_config())
     if config:
         app.config.update(config)
+    role = app.config.get("ROLE", "all")
+    if role not in ROLES:
+        raise ValueError(f"BUCKETCAST_ROLE must be one of {', '.join(ROLES)}; got {role!r}")
 
     app.extensions["bucketcast.storage"] = storage or storage_from_config(app.config)
     app.extensions["bucketcast.shows"] = ShowRepository(app.extensions["bucketcast.storage"])
@@ -61,12 +77,20 @@ def create_app(config: dict | None = None, storage=None, stats=None) -> Flask:
     from .admin import bp as admin_bp
     from .public import bp as public_bp
 
-    app.register_blueprint(admin_bp)
-    app.register_blueprint(public_bp)
+    if role in ("all", "admin"):
+        app.register_blueprint(admin_bp)
+    if role in ("all", "public"):
+        app.register_blueprint(public_bp)
 
     @app.get("/healthz")
     def healthz():
         return {"ok": True}
+
+    if role == "admin":
+        # The public "/" isn't registered here, so send visitors to the admin.
+        @app.get("/")
+        def root():
+            return redirect(url_for("admin.index"))
 
     st = app.extensions["bucketcast.storage"]
     if isinstance(st, LocalStorage):

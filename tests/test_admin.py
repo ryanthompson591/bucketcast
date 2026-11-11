@@ -82,7 +82,8 @@ def test_admin_locked_without_iap_config(storage):
 
 
 def test_admin_requires_iap_header(storage):
-    cfg = {"TESTING": True, "DEV_AUTH_BYPASS": False, "IAP_AUDIENCE": "/projects/1/apps/x"}
+    cfg = {"TESTING": True, "DEV_AUTH_BYPASS": False, "IAP_AUDIENCE": "/projects/1/apps/x",
+           "ADMIN_EMAILS": ["owner@example.com"]}
     app = create_app(cfg,
                      storage=storage)
     assert app.test_client().get("/admin/").status_code == 401
