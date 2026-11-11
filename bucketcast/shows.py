@@ -27,6 +27,8 @@ CATEGORIES = [
     "Technology", "True Crime", "TV & Film",
 ]
 
+MAX_EPISODES_PER_PAGE = 200
+
 ARTWORK_TYPES = {"image/jpeg": "jpg", "image/png": "png"}
 MAX_ARTWORK_BYTES = 10 * 1024 * 1024
 
@@ -52,6 +54,9 @@ class Show:
     artwork_path: str = ""
     # Route the feed's audio links through the app so downloads can be counted.
     track_downloads: bool = False
+    # Show page layout.
+    episodes_per_page: int = 30
+    full_notes: bool = True
     deleted: bool = False
     created_at: str = field(default_factory=lambda: _now())
     updated_at: str = field(default_factory=lambda: _now())
@@ -79,6 +84,11 @@ class Show:
             errors["language"] = "Use a language code like en or en-US."
         if self.domain and not DOMAIN_RE.match(self.domain):
             errors["domain"] = "Not a valid domain name (e.g. mypodcast.com)."
+        if not isinstance(self.episodes_per_page, int) or not (
+            1 <= self.episodes_per_page <= MAX_EPISODES_PER_PAGE
+        ):
+            errors["episodes_per_page"] = (
+                f"Use a whole number from 1 to {MAX_EPISODES_PER_PAGE}.")
         if errors:
             raise ValidationError(errors)
 

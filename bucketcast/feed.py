@@ -109,8 +109,11 @@ class FeedBuilder:
     def media_url(self, path: str) -> str:
         return self.absolute(self.storage.public_url(path)) if path else ""
 
-    def feed_url(self, show_id: str) -> str:
-        return self.media_url(feed_path(show_id))
+    def feed_url(self, show: Show) -> str:
+        """The address to give listeners and directories."""
+        if show.domain:
+            return f"https://{show.domain}/feed.xml"
+        return self.media_url(feed_path(show.id))
 
     def site_url(self, show: Show) -> str:
         if show.domain:
@@ -140,7 +143,7 @@ class FeedBuilder:
         _add(channel, "language", show.language)
         _add(channel, "generator", GENERATOR)
         _add(channel, "lastBuildDate", format_datetime(now))
-        _add(channel, _q("atom", "link"), href=self.feed_url(show.id), rel="self",
+        _add(channel, _q("atom", "link"), href=self.feed_url(show), rel="self",
              type="application/rss+xml")
 
         if show.author:
@@ -210,4 +213,4 @@ class FeedBuilder:
         xml = self.build(show, self.episodes.list(show_id), now)
         self.storage.write_bytes(feed_path(show_id), xml, FEED_CONTENT_TYPE, public=True,
                                  cache_control=FEED_CACHE_CONTROL)
-        return self.feed_url(show_id)
+        return self.feed_url(show)

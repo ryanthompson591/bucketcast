@@ -80,6 +80,27 @@
     <label for="explicit">Explicit content</label>
   </div>
 
+  <fieldset style="border:1px solid var(--line);border-radius:10px;padding:14px 16px 2px;margin:0 0 16px">
+    <legend style="font-weight:600;padding:0 6px">Site page</legend>
+    <div class="row">
+      <div class="field">
+        <label for="episodes_per_page">Episodes per page</label>
+        <input type="number" id="episodes_per_page" name="episodes_per_page" min="1" max="200" step="1"
+               value="{{ show.episodes_per_page }}" class="{{ cls('episodes_per_page') }}">
+        <div class="muted">Older episodes go on further pages, with Next and Previous links.</div>
+        {{ err('episodes_per_page') }}
+      </div>
+      <div class="field">
+        <label for="notes_style">Episode notes</label>
+        <select id="notes_style" name="notes_style">
+          <option value="full" {% if show.full_notes %}selected{% endif %}>Show in full</option>
+          <option value="excerpt" {% if not show.full_notes %}selected{% endif %}>Short excerpt only</option>
+        </select>
+        <div class="muted">In full includes images. An excerpt is the first few lines as plain text.</div>
+      </div>
+    </div>
+  </fieldset>
+
   <div class="field check">
     <input type="checkbox" id="track_downloads" name="track_downloads" {% if show.track_downloads %}checked{% endif %}>
     <label for="track_downloads">Count downloads</label>

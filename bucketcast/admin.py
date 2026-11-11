@@ -29,6 +29,7 @@ from .episodes import (
 from .feed import FeedBuilder, feed_path, feed_problems
 from .notes import render_notes
 from .shows import CATEGORIES, Show, ShowRepository, ValidationError, normalize_domain
+from .site import SiteBuilder, page_path
 from .stats import StatsStore, since_for, summarize
 from .storage import Conflict
 
@@ -149,11 +150,16 @@ def _publish(show_id: str) -> str:
     The change itself is already saved, so a failure here is reported, not raised.
     """
     try:
-        feed_builder().publish(show_id)
+        builder = feed_builder()
+        builder.publish(show_id)
+        show, _ = repo().get(show_id)
+        SiteBuilder(storage(), base_url=builder.base_url).publish(
+            show, episodes().list(show_id) if show else [], show_id=show_id)
         return ""
     except Exception:
-        current_app.logger.exception("Could not rebuild the feed for %s", show_id)
-        return " The feed could not be rebuilt; use “Rebuild feed” to try again."
+        current_app.logger.exception("Could not rebuild the feed and page for %s", show_id)
+        return (" The feed and show page could not be rebuilt; "
+                "use “Rebuild” on the Episodes page to try again.")
 
 
 @bp.post("/shows/<show_id>/feed/rebuild")
@@ -161,7 +167,7 @@ def rebuild_feed(show_id):
     _show_or_404(show_id)
     failed = _publish(show_id)
     return redirect(url_for(".list_episodes", show_id=show_id,
-                            notice=failed.strip() or "Feed rebuilt."))
+                            notice=failed.strip() or "Feed and show page rebuilt."))
 
 
 # --- download stats ----------------------------------------------------------
@@ -309,7 +315,10 @@ def list_episodes(show_id):
     has_feed = storage().object_info(feed_path(show_id)) is not None
     return render_template("admin/episodes.html", show=show,
                            episodes=episodes().list(show_id),
-                           feed_url=builder.feed_url(show_id) if has_feed else "",
+                           feed_url=builder.feed_url(show) if has_feed else "",
+                           site_url=builder.site_url(show) if has_feed else "",
+                           direct_feed_url=builder.media_url(feed_path(show_id)),
+                           direct_site_url=builder.media_url(page_path(show_id, 1)),
                            feed_problems=feed_problems(show), now=_now_iso())
 
 
@@ -522,7 +531,15 @@ def _apply_form(show: Show) -> dict:
     show.domain = normalize_domain(show.domain)
     show.explicit = f.get("explicit") == "on"
     show.track_downloads = f.get("track_downloads") == "on"
-    return {}
+    show.full_notes = f.get("notes_style", "full") != "excerpt"
+    errors = {}
+    per_page = f.get("episodes_per_page", "").strip()
+    if per_page:
+        try:
+            show.episodes_per_page = int(per_page)
+        except ValueError:
+            errors["episodes_per_page"] = "Use a whole number."
+    return errors
 
 
 def _save(show: Show, generation):

@@ -10,7 +10,7 @@ almost entirely inside Google Cloud's free tier, so your main cost is your
 domain names.
 
 > **Status:** pre-alpha. The admin panel can create shows, upload episodes and
-> publish an RSS feed; public pages are in progress (see the [issues](https://github.com/ryanthompson591/bucketcast/issues)).
+> publish an RSS feed and a show page; deployment is in progress (see the [issues](https://github.com/ryanthompson591/bucketcast/issues)).
 
 ## Why
 
@@ -181,6 +181,23 @@ requires (artwork, description, author, owner email).
   episode appears the next time the feed is rebuilt after that date; nothing
   rebuilds it automatically yet.
 - Deleting a show removes its feed.
+
+## Show page
+
+Each show also gets a static web page, rebuilt alongside the feed:
+`shows/<show-id>/index.html`, plus `page/<n>/index.html` for older episodes.
+It lists episodes newest first, each with an audio player, its thumbnail and
+its notes, and works with no JavaScript.
+
+Two settings in the show's form control the layout:
+
+- **Episodes per page** (default 30). Older episodes go on further pages,
+  linked with Next and Previous.
+- **Episode notes**: shown in full, images included (the default), or as a
+  short plain-text excerpt.
+
+Links between the generated files are relative, so the same files work at the
+show's own domain and straight from the bucket.
 
 ## Download stats
 
