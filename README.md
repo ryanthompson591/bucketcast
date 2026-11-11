@@ -9,8 +9,8 @@ want to stop paying a hosting service per show. At low traffic it should run
 almost entirely inside Google Cloud's free tier, so your main cost is your
 domain names.
 
-> **Status:** pre-alpha. The admin panel can create shows and upload episodes;
-> feeds and public pages are in progress (see the [issues](https://github.com/ryanthompson591/bucketcast/issues)).
+> **Status:** pre-alpha. The admin panel can create shows, upload episodes and
+> publish an RSS feed; public pages are in progress (see the [issues](https://github.com/ryanthompson591/bucketcast/issues)).
 
 ## Why
 
@@ -132,6 +132,7 @@ Configuration (environment variables, set in `app.yaml` for App Engine):
 | `BUCKETCAST_IAP_AUDIENCE` | IAP audience (`/projects/<number>/apps/<project-id>`). Admin is locked until this is set. |
 | `BUCKETCAST_ADMIN_EMAILS` | Optional comma-separated allow-list of admin Google accounts. |
 | `BUCKETCAST_DEV_AUTH_BYPASS` | `1` to skip admin auth. **Local development only.** |
+| `BUCKETCAST_PUBLIC_BASE_URL` | Base for media URLs in the feed when using local storage. Defaults to the address you opened the admin at. Not needed with a bucket. |
 
 ## Episode uploads
 
@@ -165,6 +166,20 @@ On Google Cloud, two one-time settings are needed:
      --member="serviceAccount:YOUR-PROJECT@appspot.gserviceaccount.com" \
      --role="roles/iam.serviceAccountTokenCreator"
    ```
+
+## RSS feed
+
+Each show's feed is a static file, `shows/<show-id>/feed.xml`, rebuilt every
+time the show or one of its episodes is saved or deleted. The Episodes page
+shows its URL, a **Rebuild feed** button, and anything Apple Podcasts still
+requires (artwork, description, author, owner email).
+
+- RSS 2.0 with `itunes:` tags, `content:encoded` show notes, and
+  `podcast:guid` / `podcast:locked`.
+- Only episodes whose publish date has passed are included. A future-dated
+  episode appears the next time the feed is rebuilt after that date; nothing
+  rebuilds it automatically yet.
+- Deleting a show removes its feed.
 
 ## Show notes and assets
 

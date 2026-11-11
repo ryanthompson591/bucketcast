@@ -36,7 +36,14 @@ class Storage:
         """Write JSON; return the new generation."""
         raise NotImplementedError
 
-    def write_bytes(self, path: str, data: bytes, content_type: str, public: bool = False) -> None:
+    def write_bytes(
+        self,
+        path: str,
+        data: bytes,
+        content_type: str,
+        public: bool = False,
+        cache_control: str | None = None,
+    ) -> None:
         raise NotImplementedError
 
     def list_dirs(self, prefix: str) -> list[str]:
@@ -110,7 +117,7 @@ class LocalStorage(Storage):
             step *= 10
         return new
 
-    def write_bytes(self, path, data, content_type, public=False):
+    def write_bytes(self, path, data, content_type, public=False, cache_control=None):
         self._atomic_write(self._p(path), data)
 
     def list_dirs(self, prefix):
@@ -213,10 +220,12 @@ class GCSStorage(Storage):
             raise Conflict(path) from e
         return blob.generation
 
-    def write_bytes(self, path, data, content_type, public=False):
+    def write_bytes(self, path, data, content_type, public=False, cache_control=None):
         # Public access is granted at the bucket level (see deployment guide),
         # not per object, so `public` is informational here.
         blob = self._bucket.blob(path)
+        if cache_control:
+            blob.cache_control = cache_control
         blob.upload_from_string(data, content_type=content_type)
 
     def list_dirs(self, prefix):

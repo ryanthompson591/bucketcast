@@ -10,6 +10,27 @@
     <a class="btn" href="{{ url_for('admin.new_episode', show_id=show.id) }}">New episode</a>
   </div>
 </div>
+<div class="card" style="margin-bottom:14px">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+    <div style="min-width:0;flex:1">
+      <strong>RSS feed</strong>
+      {% if feed_url %}
+        <div style="overflow-wrap:anywhere"><a href="{{ feed_url }}" target="_blank" rel="noopener">{{ feed_url }}</a></div>
+      {% else %}
+        <div class="muted">Not built yet.</div>
+      {% endif %}
+    </div>
+    <form method="post" action="{{ url_for('admin.rebuild_feed', show_id=show.id) }}">
+      <button class="btn secondary small" type="submit">Rebuild feed</button>
+    </form>
+  </div>
+  {% if feed_problems %}
+    <div class="muted" style="margin-top:10px">Before submitting to Apple Podcasts or Spotify:</div>
+    <ul style="margin:4px 0 0;padding-left:20px">
+      {% for problem in feed_problems %}<li>{{ problem }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+</div>
 {% if episodes %}
 <ul class="shows">
   {% for ep in episodes %}
@@ -25,6 +46,7 @@
         {%- if ep.number %} · Episode {{ ep.number }}{% endif %}
         · {{ ep.duration_seconds|duration }} · {{ ep.audio_bytes|filesize }}
         {%- if ep.explicit %} · Explicit{% endif %}
+        {%- if ep.published_at > now %} · <strong>Scheduled, not in the feed yet</strong>{% endif %}
       </div>
     </div>
   </li>
