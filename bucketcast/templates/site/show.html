@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="{{ show.language }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ show.title }}{% if page > 1 %} · Page {{ page }}{% endif %}</title>
+  {% if description %}<meta name="description" content="{{ description|truncate(200, false, '…') }}">{% endif %}
+  <link rel="alternate" type="application/rss+xml" title="{{ show.title }}" href="{{ feed_url }}">
+  {% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ show.title }}">
+  {% if description %}<meta property="og:description" content="{{ description|truncate(200, false, '…') }}">{% endif %}
+  {% if artwork_url %}<meta property="og:image" content="{{ artwork_url }}">{% endif %}
+  {% if artwork_url %}<link rel="icon" href="{{ artwork_url }}">{% endif %}
+  <style>
+    :root { --bg:#fafafa; --card:#fff; --fg:#1d1d1f; --muted:#6e6e73; --line:#d9d9de; --accent:#2f5bea; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#141416; --card:#1e1e21; --fg:#f2f2f4; --muted:#a1a1a8; --line:#35353a; --accent:#8aa6ff; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg);
+           font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    a { color: var(--accent); }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 0 20px; }
+    header.show { padding: 36px 0 28px; border-bottom: 1px solid var(--line); background: var(--card); }
+    header.show .wrap { display: flex; gap: 22px; align-items: flex-start; }
+    header.show img { width: 150px; height: 150px; border-radius: 14px; object-fit: cover; flex: none; }
+    header.show h1 { margin: 0 0 6px; font-size: 1.9rem; line-height: 1.2; }
+    header.show h1 a { color: inherit; text-decoration: none; }
+    .byline { color: var(--muted); margin: 0 0 10px; }
+    .about { margin: 0 0 14px; white-space: pre-line; }
+    .subscribe { display: inline-block; padding: 7px 14px; border: 1px solid var(--line); border-radius: 999px;
+                 text-decoration: none; color: var(--fg); font-size: .95rem; font-weight: 600; }
+    main.wrap { padding-top: 26px; padding-bottom: 10px; }
+    article { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+              padding: 22px 24px; margin-bottom: 20px; }
+    article h2 { margin: 0 0 2px; font-size: 1.35rem; line-height: 1.3; }
+    .meta { color: var(--muted); font-size: .92rem; margin: 0 0 14px; }
+    .player { display: flex; gap: 14px; align-items: center; margin-bottom: 14px; }
+    .player img { width: 72px; height: 72px; border-radius: 10px; object-fit: cover; flex: none; }
+    audio { width: 100%; min-width: 0; }
+    .notes { overflow-wrap: anywhere; }
+    .notes img { max-width: 100%; height: auto; border-radius: 8px; }
+    .notes > :first-child { margin-top: 0; }
+    .notes > :last-child { margin-bottom: 0; }
+    .empty { color: var(--muted); text-align: center; padding: 30px 0; }
+    nav.pages { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 6px 0 26px; }
+    nav.pages a { padding: 9px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+                  text-decoration: none; font-weight: 600; }
+    nav.pages span { color: var(--muted); font-size: .92rem; }
+    footer.wrap { color: var(--muted); font-size: .88rem; text-align: center;
+                  padding-top: 6px; padding-bottom: 34px; }
+    @media (max-width: 560px) {
+      header.show .wrap { flex-direction: column; }
+      header.show img { width: 120px; height: 120px; }
+      article { padding: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="show">
+    <div class="wrap">
+      {% if artwork_url %}<img src="{{ artwork_url }}" alt="{{ show.title }} artwork">{% endif %}
+      <div>
+        <h1><a href="{{ home_href }}">{{ show.title }}</a></h1>
+        {% if show.author %}<p class="byline">{{ show.author }}</p>{% endif %}
+        {% if description and page == 1 %}<p class="about">{{ description }}</p>{% endif %}
+        <a class="subscribe" href="{{ feed_href }}">RSS feed</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    {% for episode in episodes %}
+    <article>
+      <h2>{{ episode.title }}</h2>
+      <p class="meta"><time datetime="{{ episode.datetime }}">{{ episode.date }}</time>{% if episode.number %} · {{ episode.number }}{% endif %}</p>
+      <div class="player">
+        {% if episode.artwork_url %}<img src="{{ episode.artwork_url }}" alt="" loading="lazy">{% endif %}
+        <audio controls preload="none">
+          <source src="{{ episode.audio_url }}" type="{{ episode.audio_type }}">
+          <a href="{{ episode.audio_url }}">Download this episode</a>
+        </audio>
+      </div>
+      {% if episode.notes %}<div class="notes">{{ episode.notes }}</div>{% endif %}
+      {% if episode.summary %}<p class="notes">{{ episode.summary }}</p>{% endif %}
+    </article>
+    {% else %}
+    <p class="empty">No episodes yet. Check back soon.</p>
+    {% endfor %}
+
+    {% if page_count > 1 %}
+    <nav class="pages" aria-label="Episode pages">
+      {% if newer_href %}<a href="{{ newer_href }}" rel="prev">← Previous</a>{% else %}<span></span>{% endif %}
+      <span>Page {{ page }} of {{ page_count }}</span>
+      {% if older_href %}<a href="{{ older_href }}" rel="next">Next →</a>{% else %}<span></span>{% endif %}
+    </nav>
+    {% endif %}
+  </main>
+
+  <footer class="wrap">© {{ year }} {{ show.author or show.title }}</footer>
+</body>
+</html>

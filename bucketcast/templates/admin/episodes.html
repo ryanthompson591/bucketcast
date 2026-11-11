@@ -14,15 +14,25 @@
 <div class="card" style="margin-bottom:14px">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
     <div style="min-width:0;flex:1">
-      <strong>RSS feed</strong>
       {% if feed_url %}
+        <strong>Show page</strong>
+        <div style="overflow-wrap:anywhere;margin-bottom:8px"><a href="{{ site_url }}" target="_blank" rel="noopener">{{ site_url }}</a></div>
+        <strong>RSS feed</strong>
         <div style="overflow-wrap:anywhere"><a href="{{ feed_url }}" target="_blank" rel="noopener">{{ feed_url }}</a></div>
+        {% if show.domain %}
+        <div class="muted" style="margin-top:8px">
+          Those addresses work once {{ show.domain }} points at this app. Copies in the bucket:
+          <a href="{{ direct_site_url }}" target="_blank" rel="noopener">page</a> ·
+          <a href="{{ direct_feed_url }}" target="_blank" rel="noopener">feed</a>
+        </div>
+        {% endif %}
       {% else %}
+        <strong>Show page and RSS feed</strong>
         <div class="muted">Not built yet.</div>
       {% endif %}
     </div>
     <form method="post" action="{{ url_for('admin.rebuild_feed', show_id=show.id) }}">
-      <button class="btn secondary small" type="submit">Rebuild feed</button>
+      <button class="btn secondary small" type="submit">Rebuild</button>
     </form>
   </div>
   {% if feed_problems %}

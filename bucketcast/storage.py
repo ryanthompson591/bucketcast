@@ -65,6 +65,10 @@ class Storage:
         """``(name, size)`` of the files directly under ``prefix``, sorted by name."""
         raise NotImplementedError
 
+    def read_bytes(self, path: str) -> bytes | None:
+        """The object's contents, or ``None`` if missing. For small files only."""
+        raise NotImplementedError
+
     def delete(self, path: str) -> None:
         """Remove an object. Deleting something that isn't there is not an error."""
         raise NotImplementedError
@@ -151,6 +155,10 @@ class LocalStorage(Storage):
 
     def delete(self, path):
         self._p(path).unlink(missing_ok=True)
+
+    def read_bytes(self, path):
+        p = self._p(path)
+        return p.read_bytes() if p.is_file() else None
 
     def write_stream(self, path: str, stream: BinaryIO, length: int) -> int:
         """Copy ``length`` bytes from ``stream`` into ``path``; return bytes written."""
@@ -282,6 +290,14 @@ class GCSStorage(Storage):
             self._bucket.blob(path).delete()
         except NotFound:
             pass
+
+    def read_bytes(self, path):
+        from google.api_core.exceptions import NotFound
+
+        try:
+            return self._bucket.blob(path).download_as_bytes()
+        except NotFound:
+            return None
 
 
 def storage_from_config(config: dict) -> Storage:
