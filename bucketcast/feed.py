@@ -163,6 +163,10 @@ class FeedBuilder:
             _add(image, "title", show.title)
             _add(image, "link", site)
 
+        if show.previous_feed_url:
+            # Tells Apple Podcasts (and others) that the show now lives here.
+            # It only takes effect once the old feed redirects to this one.
+            _add(channel, _q("itunes", "new-feed-url"), self.feed_url(show))
         _add(channel, _q("podcast", "guid"), podcast_guid(show))
         if show.owner_email:
             # "yes" asks other hosts not to import this feed without the owner's say-so.

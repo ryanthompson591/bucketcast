@@ -17,6 +17,7 @@ SHOWS_PREFIX = "shows"
 ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+URL_RE = re.compile(r"^https?://[^\s/?#]+\.[^\s/?#]+(?:[/?#]\S*)?$", re.IGNORECASE)
 LANG_RE = re.compile(r"^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$")
 
 # Apple Podcasts top-level categories.
@@ -54,6 +55,9 @@ class Show:
     artwork_path: str = ""
     # Route the feed's audio links through the app so downloads can be counted.
     track_downloads: bool = False
+    # The feed address at the show's previous host, if it moved here. While
+    # set, the feed tells podcast apps that this is its new home.
+    previous_feed_url: str = ""
     # Show page layout.
     episodes_per_page: int = 30
     full_notes: bool = True
@@ -84,6 +88,8 @@ class Show:
             errors["language"] = "Use a language code like en or en-US."
         if self.domain and not DOMAIN_RE.match(self.domain):
             errors["domain"] = "Not a valid domain name (e.g. mypodcast.com)."
+        if self.previous_feed_url and not URL_RE.match(self.previous_feed_url):
+            errors["previous_feed_url"] = "Use a full address starting with http:// or https://."
         if not isinstance(self.episodes_per_page, int) or not (
             1 <= self.episodes_per_page <= MAX_EPISODES_PER_PAGE
         ):

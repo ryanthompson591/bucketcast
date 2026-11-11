@@ -36,7 +36,7 @@ from .storage import Conflict
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 FIELDS = ["title", "description", "author", "owner_name", "owner_email",
-          "category", "language", "domain"]
+          "category", "language", "domain", "previous_feed_url"]
 
 
 def repo() -> ShowRepository:
