@@ -9,8 +9,8 @@ want to stop paying a hosting service per show. At low traffic it should run
 almost entirely inside Google Cloud's free tier, so your main cost is your
 domain names.
 
-> **Status:** pre-alpha. The show admin panel works; episodes, feeds and public
-> pages are in progress (see the [issues](https://github.com/ryanthompson591/bucketcast/issues)).
+> **Status:** pre-alpha. The admin panel can create shows and upload episodes;
+> feeds and public pages are in progress (see the [issues](https://github.com/ryanthompson591/bucketcast/issues)).
 
 ## Why
 
@@ -132,6 +132,39 @@ Configuration (environment variables, set in `app.yaml` for App Engine):
 | `BUCKETCAST_IAP_AUDIENCE` | IAP audience (`/projects/<number>/apps/<project-id>`). Admin is locked until this is set. |
 | `BUCKETCAST_ADMIN_EMAILS` | Optional comma-separated allow-list of admin Google accounts. |
 | `BUCKETCAST_DEV_AUTH_BYPASS` | `1` to skip admin auth. **Local development only.** |
+
+## Episode uploads
+
+Audio goes straight from the browser to the bucket. The admin page asks the
+app for a signed URL (valid for one hour), `PUT`s the file to it with a
+progress bar, and then saves the episode. The app records the file's size from
+the bucket and the duration measured by the browser in
+`shows/<show-id>/episodes.json`.
+
+Locally there is no bucket, so a dev-only route (`/_local_upload/…`) stands in
+for the signed URL and writes into `.local-bucket`.
+
+On Google Cloud, two one-time settings are needed:
+
+1. **Bucket CORS**, so the browser may `PUT` to the bucket from the admin
+   page. Put your admin origin in [`cors.json`](cors.json), then:
+
+   ```bash
+   gcloud storage buckets update gs://YOUR-BUCKET --cors-file=cors.json
+   ```
+
+2. **Permission to sign URLs.** App Engine's service account has no private
+   key, so the app signs through the IAM API. Enable the *IAM Service Account
+   Credentials API* and give the service account the *Service Account Token
+   Creator* role on itself:
+
+   ```bash
+   gcloud services enable iamcredentials.googleapis.com
+   gcloud iam service-accounts add-iam-policy-binding \
+     YOUR-PROJECT@appspot.gserviceaccount.com \
+     --member="serviceAccount:YOUR-PROJECT@appspot.gserviceaccount.com" \
+     --role="roles/iam.serviceAccountTokenCreator"
+   ```
 
 ## License
 

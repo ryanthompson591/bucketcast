@@ -15,10 +15,12 @@ Passing ``if_generation_match=0`` means "only create; fail if it exists".
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import tempfile
+from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 
 class Conflict(Exception):
@@ -44,14 +46,28 @@ class Storage:
     def public_url(self, path: str) -> str:
         raise NotImplementedError
 
+    def signed_upload_url(self, path: str, content_type: str, expires_seconds: int = 3600) -> str:
+        """A URL the browser can ``PUT`` a file to, bypassing the app."""
+        raise NotImplementedError
+
+    def object_info(self, path: str) -> tuple[int, str] | None:
+        """Return ``(size_in_bytes, content_type)``, or ``None`` if missing."""
+        raise NotImplementedError
+
 
 class LocalStorage(Storage):
     """Filesystem-backed storage for local development and tests."""
 
-    def __init__(self, root: str | os.PathLike, url_prefix: str = "/_local_media/"):
+    def __init__(
+        self,
+        root: str | os.PathLike,
+        url_prefix: str = "/_local_media/",
+        upload_prefix: str = "/_local_upload/",
+    ):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.url_prefix = url_prefix
+        self.upload_prefix = upload_prefix
 
     def _p(self, path: str) -> Path:
         p = (self.root / path).resolve()
@@ -75,11 +91,15 @@ class LocalStorage(Storage):
         if if_generation_match is not None and current != if_generation_match:
             raise Conflict(path)
         self._atomic_write(p, json.dumps(data, indent=2, sort_keys=True).encode("utf-8"))
-        # Guarantee the generation changes even on very fast successive writes.
+        # Guarantee the generation moves forward even on very fast successive
+        # writes. Filesystems round timestamps differently (Windows keeps 100 ns,
+        # some keep far less), so nudge the mtime until the change actually sticks.
         new = self._gen(p)
-        if new == current:
-            os.utime(p, ns=(new + 1, new + 1))
-            new += 1
+        step = 100
+        while new <= current and step <= 10_000_000_000:
+            os.utime(p, ns=(current + step, current + step))
+            new = self._gen(p)
+            step *= 10
         return new
 
     def write_bytes(self, path, data, content_type, public=False):
@@ -96,6 +116,39 @@ class LocalStorage(Storage):
 
     def path_for(self, path: str) -> Path:
         return self._p(path)
+
+    def signed_upload_url(self, path, content_type, expires_seconds=3600):
+        # Not signed: the app's dev-only upload route stands in for the bucket.
+        self._p(path)  # reject paths that escape the root
+        return self.upload_prefix + path
+
+    def object_info(self, path):
+        p = self._p(path)
+        if not p.is_file():
+            return None
+        return p.stat().st_size, mimetypes.guess_type(p.name)[0] or "application/octet-stream"
+
+    def write_stream(self, path: str, stream: BinaryIO, length: int) -> int:
+        """Copy ``length`` bytes from ``stream`` into ``path``; return bytes written."""
+        p = self._p(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=p.parent)
+        written = 0
+        try:
+            with os.fdopen(fd, "wb") as f:
+                while written < length:
+                    chunk = stream.read(min(1024 * 1024, length - written))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    written += len(chunk)
+            if written != length:
+                raise OSError(f"upload ended early: got {written} of {length} bytes")
+            os.replace(tmp, p)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        return written
 
     @staticmethod
     def _atomic_write(p: Path, data: bytes) -> None:
@@ -158,6 +211,38 @@ class GCSStorage(Storage):
 
     def public_url(self, path):
         return f"https://storage.googleapis.com/{self.bucket_name}/{path}"
+
+    def signed_upload_url(self, path, content_type, expires_seconds=3600):
+        import google.auth
+        from google.auth import credentials as ga_credentials
+        from google.auth.transport import requests as ga_requests
+
+        kwargs = {}
+        creds, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        if not isinstance(creds, ga_credentials.Signing):
+            # App Engine's default credentials have no private key, so ask the
+            # IAM signBlob API to sign instead. The service account needs the
+            # "Service Account Token Creator" role on itself (see README).
+            creds.refresh(ga_requests.Request())
+            kwargs = {
+                "service_account_email": creds.service_account_email,
+                "access_token": creds.token,
+            }
+        return self._bucket.blob(path).generate_signed_url(
+            version="v4",
+            expiration=timedelta(seconds=expires_seconds),
+            method="PUT",
+            content_type=content_type,
+            **kwargs,
+        )
+
+    def object_info(self, path):
+        blob = self._bucket.get_blob(path)
+        if blob is None:
+            return None
+        return blob.size, blob.content_type or "application/octet-stream"
 
 
 def storage_from_config(config: dict) -> Storage:

@@ -3,7 +3,10 @@
 {% macro err(name) %}{% if errors.get(name) %}<div class="err">{{ errors[name] }}</div>{% endif %}{% endmacro %}
 {% macro cls(name) %}{% if errors.get(name) %}invalid{% endif %}{% endmacro %}
 {% block content %}
-<h1>{{ "New show" if is_new else "Edit show" }}</h1>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+  <h1>{{ "New show" if is_new else "Edit show" }}</h1>
+  {% if not is_new %}<a class="btn secondary" href="{{ url_for('admin.list_episodes', show_id=show.id) }}">Episodes</a>{% endif %}
+</div>
 {% if errors %}<div class="error-box">{{ errors.get('_form') or "Please fix the highlighted fields." }}</div>{% endif %}
 
 <form class="card" method="post" enctype="multipart/form-data">
