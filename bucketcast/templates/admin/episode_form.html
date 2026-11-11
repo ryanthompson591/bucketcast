@@ -10,7 +10,7 @@
 <h1>{{ "New episode" if is_new else "Edit episode" }}</h1>
 {% if errors %}<div class="error-box">{{ errors.get('_form') or "Please fix the highlighted fields." }}</div>{% endif %}
 
-<form class="card" method="post" id="episode-form"
+<form class="card" method="post" id="episode-form" enctype="multipart/form-data"
       data-upload-url="{{ url_for('admin.episode_upload_url', show_id=show.id) }}">
   <input type="hidden" name="revision" value="{{ episode.revision }}">
   <input type="hidden" name="audio_path" id="audio_path" value="{{ episode.audio_path }}">
@@ -54,6 +54,22 @@
   <div class="field check">
     <input type="checkbox" id="explicit" name="explicit" {% if episode.explicit %}checked{% endif %}>
     <label for="explicit">Explicit content</label>
+  </div>
+
+  <div class="field">
+    <label for="artwork">Episode thumbnail <span class="muted">(optional)</span></label>
+    {% if episode.artwork_path %}
+      <img src="{{ media_url(episode.artwork_path) }}" alt="Current thumbnail" style="width:120px;height:120px;border-radius:10px;object-fit:cover;display:block;margin-bottom:8px">
+    {% endif %}
+    <input type="file" id="artwork" name="artwork" accept="image/jpeg,image/png" class="{{ cls('artwork') }}">
+    <div class="muted">Square JPEG or PNG, 1400–3000 px. Without one, podcast apps show the show's artwork.</div>
+    {% if episode.artwork_path %}
+      <div class="check" style="margin-top:6px">
+        <input type="checkbox" id="remove_artwork" name="remove_artwork">
+        <label for="remove_artwork">Remove this thumbnail</label>
+      </div>
+    {% endif %}
+    {{ err('artwork') }}
   </div>
 
   <div class="field">

@@ -12,7 +12,7 @@ import uuid
 from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 
-from .shows import SHOWS_PREFIX, ValidationError
+from .shows import ARTWORK_TYPES, MAX_ARTWORK_BYTES, SHOWS_PREFIX, ValidationError
 from .storage import Conflict, Storage
 
 # File extension -> the MIME type published in the feed's <enclosure>.
@@ -69,6 +69,8 @@ class Episode:
     audio_bytes: int = 0
     audio_type: str = ""
     duration_seconds: int = 0
+    # Optional per-episode image; apps fall back to the show's artwork.
+    artwork_path: str = ""
     deleted: bool = False
     # Bumped on every save; edit forms send it back to detect stale edits.
     revision: int = 0
@@ -148,6 +150,19 @@ class EpisodeRepository:
             if e.id == episode_id:
                 return e
         return None
+
+    def save_artwork(self, show_id: str, episode: Episode, data: bytes, content_type: str) -> str:
+        """Store an episode image and return its path (the caller saves the episode)."""
+        ext = ARTWORK_TYPES.get(content_type)
+        if not ext:
+            raise ValidationError({"artwork": "Artwork must be a JPEG or PNG image."})
+        if len(data) > MAX_ARTWORK_BYTES:
+            raise ValidationError({"artwork": "Artwork must be 10 MB or smaller."})
+        # Timestamped filename so podcast apps and CDNs pick up changes.
+        stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+        path = f"{SHOWS_PREFIX}/{show_id}/artwork/episodes/{episode.id}-{stamp}.{ext}"
+        self.storage.write_bytes(path, data, content_type, public=True)
+        return path
 
     def add(self, show_id: str, episode: Episode) -> None:
         episode.validate(show_id)
