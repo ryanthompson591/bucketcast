@@ -15,6 +15,7 @@
         {{ show.domain or "No domain yet" }} · {{ show.category }}{% if show.explicit %} · Explicit{% endif %}
       </div>
     </div>
+    <a class="btn secondary" href="{{ url_for('admin.list_episodes', show_id=show.id) }}">Episodes</a>
   </li>
   {% endfor %}
 </ul>

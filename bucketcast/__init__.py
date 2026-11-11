@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import os
+import re
 
-from flask import Flask, abort, send_file
+from flask import Flask, abort, request, send_file
 
+from .auth import require_admin
+from .episodes import EpisodeRepository
 from .shows import ShowRepository
 from .storage import LocalStorage, storage_from_config
+
+LOCAL_UPLOAD_RE = re.compile(r"^shows/[a-z0-9-]+/audio/[A-Za-z0-9._-]+$")
 
 
 def _env_bool(name: str) -> bool:
@@ -38,6 +43,9 @@ def create_app(config: dict | None = None, storage=None) -> Flask:
 
     app.extensions["bucketcast.storage"] = storage or storage_from_config(app.config)
     app.extensions["bucketcast.shows"] = ShowRepository(app.extensions["bucketcast.storage"])
+    app.extensions["bucketcast.episodes"] = EpisodeRepository(
+        app.extensions["bucketcast.storage"]
+    )
 
     from .admin import bp as admin_bp
 
@@ -55,6 +63,20 @@ def create_app(config: dict | None = None, storage=None) -> Flask:
             p = st.path_for(path)
             if not p.is_file():
                 abort(404)
-            return send_file(p)
+            return send_file(p, conditional=True)
+
+        # Dev only: stands in for the bucket's signed upload URL. In production
+        # the browser PUTs audio straight to Cloud Storage and never hits the app.
+        @app.put("/_local_upload/<path:path>")
+        def local_upload(path):
+            require_admin()
+            if not LOCAL_UPLOAD_RE.match(path):
+                abort(403, "Uploads are only accepted into a show's audio folder.")
+            length = request.content_length
+            if length is None:
+                abort(411)
+            # Read the raw body so the artwork-sized MAX_CONTENT_LENGTH doesn't apply.
+            st.write_stream(path, request.environ["wsgi.input"], length)
+            return "", 200
 
     return app

@@ -1,0 +1,195 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ "New episode" if is_new else episode.title }} · {{ show.title }} · Bucketcast{% endblock %}
+{% macro err(name) %}{% if errors.get(name) %}<div class="err">{{ errors[name] }}</div>{% endif %}{% endmacro %}
+{% macro cls(name) %}{% if errors.get(name) %}invalid{% endif %}{% endmacro %}
+{% block content %}
+<div class="muted">
+  <a href="{{ url_for('admin.index') }}">Shows</a> ›
+  <a href="{{ url_for('admin.list_episodes', show_id=show.id) }}">{{ show.title }}</a>
+</div>
+<h1>{{ "New episode" if is_new else "Edit episode" }}</h1>
+{% if errors %}<div class="error-box">{{ errors.get('_form') or "Please fix the highlighted fields." }}</div>{% endif %}
+
+<form class="card" method="post" id="episode-form"
+      data-upload-url="{{ url_for('admin.episode_upload_url', show_id=show.id) }}">
+  <input type="hidden" name="revision" value="{{ episode.revision }}">
+  <input type="hidden" name="audio_path" id="audio_path" value="{{ episode.audio_path }}">
+  <input type="hidden" name="duration_seconds" id="duration_seconds" value="{{ episode.duration_seconds }}">
+  <input type="hidden" name="published_at" id="published_at" value="{{ episode.published_at }}">
+
+  <div class="field">
+    <label for="title">Title</label>
+    <input type="text" id="title" name="title" value="{{ episode.title }}" required class="{{ cls('title') }}">
+    {{ err('title') }}
+  </div>
+
+  <div class="field">
+    <label for="description">Description / show notes</label>
+    <textarea id="description" name="description">{{ episode.description }}</textarea>
+  </div>
+
+  <div class="field">
+    <label for="published_local">Publish date</label>
+    <input type="datetime-local" id="published_local" name="published_local"
+           value="{{ episode.published_at[:16] }}" class="{{ cls('published_at') }}">
+    <div class="muted">In your local time.</div>
+    {{ err('published_at') }}
+  </div>
+
+  <div class="row">
+    <div class="field">
+      <label for="season">Season <span class="muted">(optional)</span></label>
+      <input type="number" id="season" name="season" min="1" step="1"
+             value="{{ episode.season if episode.season is not none else '' }}" class="{{ cls('season') }}">
+      {{ err('season') }}
+    </div>
+    <div class="field">
+      <label for="number">Episode number <span class="muted">(optional)</span></label>
+      <input type="number" id="number" name="number" min="1" step="1"
+             value="{{ episode.number if episode.number is not none else '' }}" class="{{ cls('number') }}">
+      {{ err('number') }}
+    </div>
+  </div>
+
+  <div class="field check">
+    <input type="checkbox" id="explicit" name="explicit" {% if episode.explicit %}checked{% endif %}>
+    <label for="explicit">Explicit content</label>
+  </div>
+
+  <div class="field">
+    <label for="audio_file">Audio file</label>
+    {% if episode.audio_path %}
+      <audio controls preload="none" src="{{ media_url(episode.audio_path) }}" style="display:block;width:100%;margin-bottom:8px"></audio>
+      <div class="muted" style="margin-bottom:8px">
+        Current file: {{ episode.audio_path.rsplit('/', 1)[-1] }}
+        · {{ episode.duration_seconds|duration }} · {{ episode.audio_bytes|filesize }}
+      </div>
+    {% endif %}
+    {# No name attribute on purpose: the file goes straight to the bucket, never to the app. #}
+    <input type="file" id="audio_file" accept=".mp3,.m4a,audio/mpeg,audio/mp4,audio/x-m4a"
+           class="{{ cls('audio') }}" {% if not episode.audio_path %}required{% endif %}>
+    <div class="muted">MP3 or M4A.{% if episode.audio_path %} Choose a file only to replace the current one.{% endif %}</div>
+    <progress id="upload-progress" max="100" value="0" hidden></progress>
+    <div id="upload-status" class="muted" role="status"></div>
+    {{ err('audio') }}
+  </div>
+
+  <div class="actions">
+    <button class="btn" type="submit" id="submit-btn">{{ "Upload and publish" if is_new else "Save changes" }}</button>
+    <a class="btn secondary" href="{{ url_for('admin.list_episodes', show_id=show.id) }}">Cancel</a>
+  </div>
+</form>
+
+{% if not is_new %}
+<form method="post" action="{{ url_for('admin.delete_episode', show_id=show.id, episode_id=episode.id) }}" style="margin-top:18px"
+      onsubmit="return confirm('Delete this episode? Its audio file stays in the bucket.')">
+  <button class="btn danger" type="submit">Delete episode</button>
+</form>
+{% endif %}
+
+<script>
+(function () {
+  var form = document.getElementById('episode-form');
+  var fileInput = document.getElementById('audio_file');
+  var pathField = document.getElementById('audio_path');
+  var durationField = document.getElementById('duration_seconds');
+  var publishedUtc = document.getElementById('published_at');
+  var publishedLocal = document.getElementById('published_local');
+  var progress = document.getElementById('upload-progress');
+  var status = document.getElementById('upload-status');
+  var submitBtn = document.getElementById('submit-btn');
+
+  // The stored publish date is UTC; show and edit it in local time.
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function toLocalInput(d) {
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+           'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  var stored = new Date(publishedUtc.value);
+  publishedLocal.value = toLocalInput(isNaN(stored) ? new Date() : stored);
+
+  // Read the duration from the file in the browser, so the app never has to.
+  var uploadedFile = null;
+  var durationReady = Promise.resolve();
+  fileInput.addEventListener('change', function () {
+    uploadedFile = null;
+    var file = fileInput.files[0];
+    if (!file) return;
+    durationReady = new Promise(function (resolve) {
+      var audio = new Audio();
+      var url = URL.createObjectURL(file);
+      var done = function () { URL.revokeObjectURL(url); resolve(); };
+      audio.preload = 'metadata';
+      audio.onloadedmetadata = function () {
+        if (isFinite(audio.duration)) durationField.value = Math.round(audio.duration);
+        done();
+      };
+      audio.onerror = done;
+      setTimeout(done, 8000);
+      audio.src = url;
+    });
+  });
+
+  function putFile(info, file) {
+    return new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('PUT', info.url);
+      Object.keys(info.headers || {}).forEach(function (k) { xhr.setRequestHeader(k, info.headers[k]); });
+      xhr.upload.onprogress = function (e) {
+        if (!e.lengthComputable) return;
+        var pct = Math.floor(e.loaded / e.total * 100);
+        progress.value = pct;
+        status.textContent = 'Uploading… ' + pct + '% (' +
+          (e.loaded / 1048576).toFixed(1) + ' of ' + (e.total / 1048576).toFixed(1) + ' MB)';
+      };
+      xhr.onload = function () {
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new Error('Upload failed (HTTP ' + xhr.status + ').'));
+      };
+      xhr.onerror = function () {
+        reject(new Error('Upload failed. Check your connection and the bucket\'s CORS settings.'));
+      };
+      xhr.send(file);
+    });
+  }
+
+  form.addEventListener('submit', function (ev) {
+    var when = new Date(publishedLocal.value);
+    if (!isNaN(when)) publishedUtc.value = when.toISOString();
+
+    var file = fileInput.files[0];
+    if (!file || file === uploadedFile) return;  // nothing new to upload
+
+    ev.preventDefault();
+    submitBtn.disabled = true;
+    progress.hidden = false;
+    progress.value = 0;
+    status.textContent = 'Starting upload…';
+
+    durationReady.then(function () {
+      return fetch(form.dataset.uploadUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, size: file.size })
+      });
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (info) {
+        if (!r.ok) throw new Error(info.error || 'Could not start the upload.');
+        return info;
+      });
+    }).then(function (info) {
+      return putFile(info, file).then(function () {
+        pathField.value = info.path;
+        uploadedFile = file;
+        status.textContent = 'Upload complete. Saving…';
+        form.submit();
+      });
+    }).catch(function (e) {
+      status.textContent = e.message;
+      progress.hidden = true;
+      submitBtn.disabled = false;
+    });
+  });
+})();
+</script>
+{% endblock %}
