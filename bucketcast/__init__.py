@@ -11,6 +11,7 @@ from .assets import AssetRepository
 from .auth import require_admin
 from .episodes import EpisodeRepository
 from .shows import ShowRepository
+from .stats import stats_from_config
 from .storage import LocalStorage, storage_from_config
 
 LOCAL_UPLOAD_RE = re.compile(r"^shows/[a-z0-9-]+/audio/[A-Za-z0-9._-]+$")
@@ -33,12 +34,16 @@ def load_config() -> dict:
         "DEV_AUTH_BYPASS": _env_bool("BUCKETCAST_DEV_AUTH_BYPASS"),
         # Only needed for local development, where media URLs are site-relative.
         "PUBLIC_BASE_URL": os.environ.get("BUCKETCAST_PUBLIC_BASE_URL", ""),
+        # Download stats: the BigQuery table the log sink writes to
+        # (project.dataset.table). Unset means a local file, for development.
+        "STATS_BQ_TABLE": os.environ.get("BUCKETCAST_STATS_BQ_TABLE", ""),
+        "STATS_LOCAL_DIR": os.environ.get("BUCKETCAST_STATS_LOCAL_DIR", ".local-stats"),
         # Artwork uploads go through the app (audio never does).
         "MAX_CONTENT_LENGTH": 12 * 1024 * 1024,
     }
 
 
-def create_app(config: dict | None = None, storage=None) -> Flask:
+def create_app(config: dict | None = None, storage=None, stats=None) -> Flask:
     app = Flask(__name__)
     app.config.update(load_config())
     if config:
@@ -51,9 +56,13 @@ def create_app(config: dict | None = None, storage=None) -> Flask:
     )
     app.extensions["bucketcast.assets"] = AssetRepository(app.extensions["bucketcast.storage"])
 
+    app.extensions["bucketcast.stats"] = stats or stats_from_config(app.config)
+
     from .admin import bp as admin_bp
+    from .public import bp as public_bp
 
     app.register_blueprint(admin_bp)
+    app.register_blueprint(public_bp)
 
     @app.get("/healthz")
     def healthz():

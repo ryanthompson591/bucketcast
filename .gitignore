@@ -2,5 +2,6 @@ __pycache__/
 *.pyc
 .venv/
 .local-bucket/
+.local-stats/
 .pytest_cache/
 .ruff_cache/

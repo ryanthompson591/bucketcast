@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
@@ -28,6 +29,7 @@ from .episodes import (
 from .feed import FeedBuilder, feed_path, feed_problems
 from .notes import render_notes
 from .shows import CATEGORIES, Show, ShowRepository, ValidationError, normalize_domain
+from .stats import StatsStore, since_for, summarize
 from .storage import Conflict
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -160,6 +162,105 @@ def rebuild_feed(show_id):
     failed = _publish(show_id)
     return redirect(url_for(".list_episodes", show_id=show_id,
                             notice=failed.strip() or "Feed rebuilt."))
+
+
+# --- download stats ----------------------------------------------------------
+
+STATS_RANGES = {"7": 7, "30": 30, "90": 90, "all": None}
+STATS_CACHE_SECONDS = 300
+
+
+def stats_store() -> StatsStore:
+    return current_app.extensions["bucketcast.stats"]
+
+
+def _summary(show_id: str, range_key: str):
+    """Counted downloads for the dashboard, cached briefly (BigQuery bills per query)."""
+    cache = current_app.extensions.setdefault("bucketcast.stats_cache", {})
+    key, now = (show_id, range_key), time.monotonic()
+    if key in cache and now - cache[key][0] < STATS_CACHE_SECONDS:
+        return cache[key][1]
+    days = STATS_RANGES[range_key]
+    today = datetime.now(UTC).date()
+    summary = summarize(stats_store().rows(show_id, since_for(days, today)), days, today)
+    if not current_app.config.get("TESTING") and current_app.config.get("STATS_BQ_TABLE"):
+        cache[key] = (now, summary)
+    return summary
+
+
+@bp.get("/shows/<show_id>/stats")
+def show_stats(show_id):
+    show = _show_or_404(show_id)
+    range_key = request.args.get("range", "30")
+    if range_key not in STATS_RANGES:
+        range_key = "30"
+    summary, error = None, ""
+    try:
+        summary = _summary(show_id, range_key)
+    except Exception:
+        current_app.logger.exception("Could not load download stats for %s", show_id)
+        error = "The download numbers couldn't be loaded. Check the app's logs for the reason."
+
+    rows, chart = [], None
+    if summary:
+        rows = _episode_rows(show_id, summary.by_episode)
+        chart = _bar_chart(summary.by_day)
+    return render_template("admin/stats.html", show=show, summary=summary, error=error,
+                           episode_rows=rows, chart=chart, range_key=range_key,
+                           source=stats_store().describe())
+
+
+def _episode_rows(show_id: str, counts: dict[str, int]) -> list[tuple[str, int]]:
+    """(title, downloads) per episode, most downloaded first, then newest first."""
+    rows = []
+    remaining = dict(counts)
+    for position, episode in enumerate(episodes().list(show_id, include_deleted=True)):
+        n = remaining.pop(episode.id, 0)
+        if episode.deleted and not n:
+            continue
+        title = episode.title + (" (deleted)" if episode.deleted else "")
+        rows.append((-n, position, title, n))
+    # Downloads logged for an episode that no longer exists at all.
+    rows += [(-n, len(rows) + i, "Unknown episode", n)
+             for i, n in enumerate(remaining.values())]
+    return [(title, n) for _, _, title, n in sorted(rows)]
+
+
+def _bar_chart(by_day: list, width: int = 720, height: int = 220) -> dict:
+    """Geometry for the downloads-per-day bar chart, drawn as inline SVG."""
+    left, right, top, bottom = 44, 8, 12, 26
+    plot_w, plot_h = width - left - right, height - top - bottom
+    peak = max((n for _, n in by_day), default=0)
+    # Round the axis up to a tidy number so gridlines land on whole downloads.
+    step, i = 1, 0
+    while step * 5 < peak:  # 1, 2, 5, 10, 20, 50, ... until five steps cover the peak
+        step = step * 5 // 2 if i % 3 == 1 else step * 2
+        i += 1
+    top_value = step * max(2, -(-peak // step))
+    slot = plot_w / max(len(by_day), 1)
+    bar_w = max(1.0, min(28.0, slot - 2))  # 2px gap between neighbours
+    label_every = max(1, -(-len(by_day) // 8))
+    bars = []
+    for i, (day, n) in enumerate(by_day):
+        h = plot_h * n / top_value
+        bars.append({
+            "x": round(left + i * slot + (slot - bar_w) / 2, 2),
+            "y": round(top + plot_h - h, 2),
+            "w": round(bar_w, 2),
+            "h": round(h, 2),
+            "r": min(4, round(bar_w / 2, 2), round(h, 2)),
+            "slot_x": round(left + i * slot, 2),
+            "slot_w": round(slot, 2),
+            "n": n,
+            "label": f"{day:%b} {day.day}",
+            "full": f"{day:%a}, {day:%b} {day.day}, {day.year}",
+            "tick": i % label_every == 0,
+            "cx": round(left + i * slot + slot / 2, 2),
+        })
+    grid = [{"y": round(top + plot_h - plot_h * v / top_value, 2), "value": v}
+            for v in range(0, top_value + 1, step)]
+    return {"width": width, "height": height, "left": left, "right": width - right,
+            "top": top, "base": top + plot_h, "bars": bars, "grid": grid, "peak": peak}
 
 
 # --- episodes ----------------------------------------------------------------
@@ -420,6 +521,7 @@ def _apply_form(show: Show) -> dict:
         setattr(show, name, f.get(name, "").strip())
     show.domain = normalize_domain(show.domain)
     show.explicit = f.get("explicit") == "on"
+    show.track_downloads = f.get("track_downloads") == "on"
     return {}
 
 

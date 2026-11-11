@@ -50,6 +50,8 @@ class Show:
     explicit: bool = False
     domain: str = ""
     artwork_path: str = ""
+    # Route the feed's audio links through the app so downloads can be counted.
+    track_downloads: bool = False
     deleted: bool = False
     created_at: str = field(default_factory=lambda: _now())
     updated_at: str = field(default_factory=lambda: _now())

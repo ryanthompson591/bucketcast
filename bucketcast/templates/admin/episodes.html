@@ -7,6 +7,7 @@
   <div style="display:flex;gap:10px">
     <a class="btn secondary" href="{{ url_for('admin.edit_show', show_id=show.id) }}">Show settings</a>
     <a class="btn secondary" href="{{ url_for('admin.list_assets', show_id=show.id) }}">Assets</a>
+    <a class="btn secondary" href="{{ url_for('admin.show_stats', show_id=show.id) }}">Stats</a>
     <a class="btn" href="{{ url_for('admin.new_episode', show_id=show.id) }}">New episode</a>
   </div>
 </div>
