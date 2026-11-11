@@ -31,6 +31,8 @@ def load_config() -> dict:
             if e.strip()
         ],
         "DEV_AUTH_BYPASS": _env_bool("BUCKETCAST_DEV_AUTH_BYPASS"),
+        # Only needed for local development, where media URLs are site-relative.
+        "PUBLIC_BASE_URL": os.environ.get("BUCKETCAST_PUBLIC_BASE_URL", ""),
         # Artwork uploads go through the app (audio never does).
         "MAX_CONTENT_LENGTH": 12 * 1024 * 1024,
     }

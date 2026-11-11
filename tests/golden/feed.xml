@@ -1,0 +1,61 @@
+<?xml version='1.0' encoding='utf-8'?>
+<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:podcast="https://podcastindex.org/namespace/1.0" version="2.0">
+  <channel>
+    <title>Sci-Fi Musicals &amp; More</title>
+    <link>https://media.example.com/_local_media/shows/scifi/index.html</link>
+    <description>Episodic &lt;musicals&gt; in space.</description>
+    <language>en</language>
+    <generator>Bucketcast (https://github.com/ryanthompson591/bucketcast)</generator>
+    <lastBuildDate>Wed, 11 Nov 2026 20:00:00 +0000</lastBuildDate>
+    <atom:link href="https://media.example.com/_local_media/shows/scifi/feed.xml" rel="self" type="application/rss+xml" />
+    <itunes:author>Ryan</itunes:author>
+    <itunes:summary>Episodic &lt;musicals&gt; in space.</itunes:summary>
+    <itunes:type>episodic</itunes:type>
+    <itunes:explicit>false</itunes:explicit>
+    <itunes:category text="Fiction" />
+    <itunes:owner>
+      <itunes:name>Ryan T</itunes:name>
+      <itunes:email>owner@example.com</itunes:email>
+    </itunes:owner>
+    <itunes:image href="https://media.example.com/_local_media/shows/scifi/artwork/cover-20260101000000.png" />
+    <image>
+      <url>https://media.example.com/_local_media/shows/scifi/artwork/cover-20260101000000.png</url>
+      <title>Sci-Fi Musicals &amp; More</title>
+      <link>https://media.example.com/_local_media/shows/scifi/index.html</link>
+    </image>
+    <podcast:guid>30318a89-e5dc-58ff-a9bf-2b08a7383fd0</podcast:guid>
+    <podcast:locked owner="owner@example.com">yes</podcast:locked>
+    <item>
+      <title>Christmas in Robot World</title>
+      <guid isPermaLink="false">0a85c0a1-6b3d-4064-90a8-d9298cb335b5</guid>
+      <pubDate>Sun, 01 Nov 2026 12:00:00 +0000</pubDate>
+      <link>https://media.example.com/_local_media/shows/scifi/index.html</link>
+      <enclosure url="https://media.example.com/_local_media/shows/scifi/audio/aaaa-christmas.mp3" length="15728640" type="audio/mpeg" />
+      <description>&lt;p&gt;&lt;img src="https://media.example.com/_local_media/shows/scifi/assets/robots.jpg" alt="Robots" loading="lazy" /&gt;&lt;/p&gt;
+&lt;p&gt;A boy &amp;amp; his &lt;strong&gt;robot&lt;/strong&gt; parents.&lt;br /&gt;
+Watch: &lt;a href="https://youtu.be/abc"&gt;https://youtu.be/abc&lt;/a&gt;&lt;/p&gt;
+</description>
+      <content:encoded>&lt;p&gt;&lt;img src="https://media.example.com/_local_media/shows/scifi/assets/robots.jpg" alt="Robots" loading="lazy" /&gt;&lt;/p&gt;
+&lt;p&gt;A boy &amp;amp; his &lt;strong&gt;robot&lt;/strong&gt; parents.&lt;br /&gt;
+Watch: &lt;a href="https://youtu.be/abc"&gt;https://youtu.be/abc&lt;/a&gt;&lt;/p&gt;
+</content:encoded>
+      <itunes:title>Christmas in Robot World</itunes:title>
+      <itunes:episodeType>full</itunes:episodeType>
+      <itunes:duration>1834</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+      <itunes:season>2</itunes:season>
+      <itunes:episode>7</itunes:episode>
+      <itunes:image href="https://media.example.com/_local_media/shows/scifi/artwork/episodes/0a85-20261101.jpg" />
+    </item>
+    <item>
+      <title>Ragna Rock</title>
+      <guid isPermaLink="false">libsyn-legacy-guid-123</guid>
+      <pubDate>Sat, 15 Nov 2025 08:00:00 +0000</pubDate>
+      <link>https://media.example.com/_local_media/shows/scifi/index.html</link>
+      <enclosure url="https://media.example.com/_local_media/shows/scifi/audio/bbbb-ragna.m4a" length="1048576" type="audio/x-m4a" />
+      <itunes:title>Ragna Rock</itunes:title>
+      <itunes:episodeType>full</itunes:episodeType>
+      <itunes:explicit>true</itunes:explicit>
+    </item>
+  </channel>
+</rss>

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from flask import (
@@ -24,6 +25,7 @@ from .episodes import (
     audio_type_for,
     new_audio_path,
 )
+from .feed import FeedBuilder, feed_path, feed_problems
 from .notes import render_notes
 from .shows import CATEGORIES, Show, ShowRepository, ValidationError, normalize_domain
 from .storage import Conflict
@@ -78,7 +80,8 @@ def new_show():
         if not errors:
             try:
                 _save(show, generation=None)
-                return redirect(url_for(".index", notice=f"Created “{show.title}”."))
+                return redirect(url_for(
+                    ".index", notice=f"Created “{show.title}”." + _publish(show.id)))
             except ValidationError as e:
                 errors = e.errors
             except Conflict:
@@ -99,7 +102,8 @@ def edit_show(show_id):
         if not errors:
             try:
                 _save(show, generation=int(posted_gen) if posted_gen else generation)
-                return redirect(url_for(".index", notice=f"Saved “{show.title}”."))
+                return redirect(url_for(
+                    ".index", notice=f"Saved “{show.title}”." + _publish(show.id)))
             except ValidationError as e:
                 errors = e.errors
             except Conflict:
@@ -121,8 +125,41 @@ def delete_show(show_id):
     except Conflict:
         return redirect(url_for(".edit_show", show_id=show_id,
                                 notice="Couldn't delete: the show was just changed. Try again."))
+    _publish(show_id)  # removes the deleted show's feed
     return redirect(url_for(".index",
                             notice=f"Deleted “{show.title}”. Its files are still in the bucket."))
+
+
+# --- feed --------------------------------------------------------------------
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def feed_builder() -> FeedBuilder:
+    base = current_app.config.get("PUBLIC_BASE_URL") or request.url_root
+    return FeedBuilder(storage(), base_url=base)
+
+
+def _publish(show_id: str) -> str:
+    """Rebuild the show's feed after a change. Returns text to add to the notice.
+
+    The change itself is already saved, so a failure here is reported, not raised.
+    """
+    try:
+        feed_builder().publish(show_id)
+        return ""
+    except Exception:
+        current_app.logger.exception("Could not rebuild the feed for %s", show_id)
+        return " The feed could not be rebuilt; use “Rebuild feed” to try again."
+
+
+@bp.post("/shows/<show_id>/feed/rebuild")
+def rebuild_feed(show_id):
+    _show_or_404(show_id)
+    failed = _publish(show_id)
+    return redirect(url_for(".list_episodes", show_id=show_id,
+                            notice=failed.strip() or "Feed rebuilt."))
 
 
 # --- episodes ----------------------------------------------------------------
@@ -167,8 +204,12 @@ def filesize(size: int) -> str:
 @bp.get("/shows/<show_id>/episodes")
 def list_episodes(show_id):
     show = _show_or_404(show_id)
+    builder = feed_builder()
+    has_feed = storage().object_info(feed_path(show_id)) is not None
     return render_template("admin/episodes.html", show=show,
-                           episodes=episodes().list(show_id))
+                           episodes=episodes().list(show_id),
+                           feed_url=builder.feed_url(show_id) if has_feed else "",
+                           feed_problems=feed_problems(show), now=_now_iso())
 
 
 @bp.post("/shows/<show_id>/episodes/upload-url")
@@ -203,9 +244,9 @@ def new_episode(show_id):
             try:
                 _apply_episode_artwork(show_id, episode)
                 episodes().add(show_id, episode)
-                # TODO(#5, #6): regenerate feed.xml and index.html for this show.
-                return redirect(url_for(".list_episodes", show_id=show_id,
-                                        notice=f"Published “{episode.title}”."))
+                return redirect(url_for(
+                    ".list_episodes", show_id=show_id,
+                    notice=f"Published “{episode.title}”." + _publish(show_id)))
             except ValidationError as e:
                 errors = e.errors
     return render_template("admin/episode_form.html", show=show, episode=episode,
@@ -228,8 +269,9 @@ def edit_episode(show_id, episode_id):
             try:
                 _apply_episode_artwork(show_id, episode)
                 episodes().update(show_id, episode, revision)
-                return redirect(url_for(".list_episodes", show_id=show_id,
-                                        notice=f"Saved “{episode.title}”."))
+                return redirect(url_for(
+                    ".list_episodes", show_id=show_id,
+                    notice=f"Saved “{episode.title}”." + _publish(show_id)))
             except ValidationError as e:
                 errors = e.errors
             except Conflict:
@@ -253,7 +295,8 @@ def delete_episode(show_id, episode_id):
                                        "Try again."))
     return redirect(url_for(
         ".list_episodes", show_id=show_id,
-        notice=f"Deleted “{episode.title}”. Its audio file is still in the bucket."))
+        notice=f"Deleted “{episode.title}”. Its audio file is still in the bucket."
+               + _publish(show_id)))
 
 
 # --- show assets and notes ---------------------------------------------------
@@ -386,4 +429,3 @@ def _save(show: Show, generation):
     if art and art.filename:
         show.artwork_path = repo().save_artwork(show, art.read(), art.mimetype)
     repo().save(show, generation)
-    # TODO(#5, #6): regenerate feed.xml and index.html for this show.
