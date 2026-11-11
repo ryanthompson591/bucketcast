@@ -80,6 +80,14 @@
     <label for="explicit">Explicit content</label>
   </div>
 
+  <div class="field">
+    <label for="previous_feed_url">Previous feed address <span class="muted">(only if this show moved from another host)</span></label>
+    <input type="text" id="previous_feed_url" name="previous_feed_url" value="{{ show.previous_feed_url }}"
+           placeholder="https://oldhost.example.com/yourshow/rss" class="{{ cls('previous_feed_url') }}">
+    <div class="muted">While this is filled in, the feed tells podcast apps it has moved here. Clear it a few months after the move.</div>
+    {{ err('previous_feed_url') }}
+  </div>
+
   <fieldset style="border:1px solid var(--line);border-radius:10px;padding:14px 16px 2px;margin:0 0 16px">
     <legend style="font-weight:600;padding:0 6px">Site page</legend>
     <div class="row">

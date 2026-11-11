@@ -95,13 +95,41 @@ Key design decisions:
 - Transcripts and chapters (Podcasting 2.0)
 - Additional storage backends (S3-compatible)
 
-## Migrating from Libsyn (planned flow)
+## Moving a show from another host
 
-1. `bucketcast import --show my-show --feed https://…libsyn…/rss`
-2. Check the new feed at `https://yourdomain/feed.xml`.
-3. In Libsyn, redirect your old feed to the new URL.
-4. Leave Libsyn active for a few weeks while podcast apps and directories
-   follow the redirect, then cancel.
+Listeners follow a show by its feed address, so moving hosts means sending
+that address to the new feed without losing anyone. Two things do it
+together, and both are needed:
+
+- **A redirect at the old host** (a permanent, "301" redirect from the old
+  feed address to the new one). This is what moves existing subscribers:
+  their apps ask the old address, get sent to the new one, and remember it.
+- **`<itunes:new-feed-url>` in the new feed**, which tells Apple Podcasts and
+  other directories that the new address is the show's real home. Bucketcast
+  adds it while the show's **Previous feed address** setting is filled in.
+
+Episode GUIDs must stay the same across the move, or apps treat every
+episode as new and download the back catalogue again.
+
+Steps:
+
+1. Bring the show's episodes across with their original GUIDs.
+2. Point the show's domain at Bucketcast (see *Custom domains*) and check
+   the new feed at `https://yourdomain.com/feed.xml` in a feed validator.
+3. In the show's settings, put the old feed address in **Previous feed
+   address** and save.
+4. At the old host, set up the redirect to `https://yourdomain.com/feed.xml`.
+   On Libsyn this is a "Redirect Feed URL" setting under the feed's advanced
+   options; their help pages have the current steps.
+5. Subscribe to the old address in a podcast app and confirm new episodes
+   arrive from the new feed.
+6. Keep the old account active for at least four weeks, so apps that check
+   rarely still see the redirect. Then cancel it, and clear **Previous feed
+   address** after a few months.
+
+If the domain itself is staying the same and only the hosting behind it is
+changing, subscribers keep the same feed address only if the path matches
+too. Otherwise the steps above still apply.
 
 ## Tech stack
 

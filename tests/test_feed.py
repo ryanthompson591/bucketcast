@@ -9,7 +9,7 @@ from bucketcast import create_app
 from bucketcast.assets import AssetRepository
 from bucketcast.episodes import Episode, EpisodeRepository
 from bucketcast.feed import FeedBuilder, feed_path, feed_problems, podcast_guid
-from bucketcast.shows import Show, ShowRepository
+from bucketcast.shows import Show, ShowRepository, ValidationError
 from bucketcast.storage import LocalStorage
 
 GOLDEN = Path(__file__).parent / "golden" / "feed.xml"
@@ -303,3 +303,49 @@ def test_save_survives_a_feed_failure(client, storage, monkeypatch):
         "published_at": "2026-01-01T00:00:00Z"})
     assert r.status_code == 302 and "could+not+be+rebuilt" in r.headers["Location"]
     assert [e.title for e in EpisodeRepository(storage).list("my-show")] == ["Kept"]
+
+
+# --- moving from another host --------------------------------------------------
+
+def test_new_feed_url_only_while_previous_address_is_set(storage):
+    assert parse(build(storage)).find("itunes:new-feed-url", NS) is None
+
+    moved = sample_show(previous_feed_url="https://scifimusical.libsyn.com/rss",
+                        domain="scifimusicalpodcast.com")
+    channel = parse(build(storage, moved))
+    new_home = channel.findtext("itunes:new-feed-url", namespaces=NS)
+    assert new_home == "https://scifimusicalpodcast.com/feed.xml"
+    assert new_home == channel.find("atom:link", NS).get("href")
+
+
+@pytest.mark.parametrize("value,ok", [
+    ("", True),
+    ("https://scifimusical.libsyn.com/rss", True),
+    ("http://feeds.example.com/show?format=xml", True),
+    ("scifimusical.libsyn.com/rss", False),
+    ("ftp://example.com/rss", False),
+    ("https://no-dot", False),
+    ("https://example.com/has space", False),
+])
+def test_previous_feed_url_validation(value, ok):
+    show = Show(id="x", title="X", previous_feed_url=value)
+    if ok:
+        show.validate()
+    else:
+        with pytest.raises(ValidationError) as e:
+            show.validate()
+        assert "previous_feed_url" in e.value.errors
+
+
+def test_previous_feed_address_in_show_form(client, storage):
+    data = {"id": "my-show", "title": "My Show", "category": "Technology", "language": "en"}
+    r = client.post("/admin/shows/new", data={**data, "previous_feed_url": "not a url"})
+    assert r.status_code == 200 and b"starting with http://" in r.data
+
+    client.post("/admin/shows/new",
+                data={**data, "previous_feed_url": " https://old.example.com/rss "})
+    show, _ = ShowRepository(storage).get("my-show")
+    assert show.previous_feed_url == "https://old.example.com/rss"
+    feed = client.get("/_local_media/shows/my-show/feed.xml").data
+    assert b"<itunes:new-feed-url>http://localhost/_local_media/shows/my-show/feed.xml<" in feed
+    assert b'value="https://old.example.com/rss"' in client.get("/admin/shows/my-show").data
