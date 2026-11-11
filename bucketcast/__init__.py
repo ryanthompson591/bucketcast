@@ -7,6 +7,7 @@ import re
 
 from flask import Flask, abort, request, send_file
 
+from .assets import AssetRepository
 from .auth import require_admin
 from .episodes import EpisodeRepository
 from .shows import ShowRepository
@@ -46,6 +47,7 @@ def create_app(config: dict | None = None, storage=None) -> Flask:
     app.extensions["bucketcast.episodes"] = EpisodeRepository(
         app.extensions["bucketcast.storage"]
     )
+    app.extensions["bucketcast.assets"] = AssetRepository(app.extensions["bucketcast.storage"])
 
     from .admin import bp as admin_bp
 

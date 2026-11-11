@@ -14,6 +14,7 @@ from flask import (
     url_for,
 )
 
+from .assets import AssetRepository
 from .auth import require_admin
 from .episodes import (
     MAX_AUDIO_BYTES,
@@ -23,6 +24,7 @@ from .episodes import (
     audio_type_for,
     new_audio_path,
 )
+from .notes import render_notes
 from .shows import CATEGORIES, Show, ShowRepository, ValidationError, normalize_domain
 from .storage import Conflict
 
@@ -207,7 +209,8 @@ def new_episode(show_id):
             except ValidationError as e:
                 errors = e.errors
     return render_template("admin/episode_form.html", show=show, episode=episode,
-                           errors=errors, is_new=True)
+                           errors=errors, is_new=True,
+                           notes_html=_render_notes(show_id, episode.description))
 
 
 @bp.route("/shows/<show_id>/episodes/<episode_id>", methods=["GET", "POST"])
@@ -233,7 +236,8 @@ def edit_episode(show_id, episode_id):
                 errors = {"_form": "This episode was changed somewhere else since you opened "
                                    "it. Reload the page and make your edits again."}
     return render_template("admin/episode_form.html", show=show, episode=episode,
-                           errors=errors, is_new=False)
+                           errors=errors, is_new=False,
+                           notes_html=_render_notes(show_id, episode.description))
 
 
 @bp.post("/shows/<show_id>/episodes/<episode_id>/delete")
@@ -250,6 +254,64 @@ def delete_episode(show_id, episode_id):
     return redirect(url_for(
         ".list_episodes", show_id=show_id,
         notice=f"Deleted “{episode.title}”. Its audio file is still in the bucket."))
+
+
+# --- show assets and notes ---------------------------------------------------
+
+def assets() -> AssetRepository:
+    return current_app.extensions["bucketcast.assets"]
+
+
+def _wants_json() -> bool:
+    return request.accept_mimetypes.best == "application/json"
+
+
+@bp.get("/shows/<show_id>/assets")
+def list_assets(show_id):
+    show = _show_or_404(show_id)
+    items = assets().list(show_id)
+    if _wants_json():
+        return {"assets": [a.to_dict() for a in items]}
+    return render_template("admin/assets.html", show=show, assets=items,
+                           error=request.args.get("error", ""))
+
+
+@bp.post("/shows/<show_id>/assets")
+def upload_asset(show_id):
+    _show_or_404(show_id)
+    upload = request.files.get("file")
+    try:
+        if not upload or not upload.filename:
+            raise ValidationError({"file": "Choose an image to upload."})
+        asset = assets().save(show_id, upload.filename, upload.read())
+    except ValidationError as e:
+        message = e.errors["file"]
+        if _wants_json():
+            return {"error": message}, 400
+        return redirect(url_for(".list_assets", show_id=show_id, error=message))
+    if _wants_json():
+        return asset.to_dict()
+    return redirect(url_for(".list_assets", show_id=show_id, notice=f"Added {asset.name}."))
+
+
+@bp.post("/shows/<show_id>/assets/<name>/delete")
+def delete_asset(show_id, name):
+    _show_or_404(show_id)
+    if not assets().delete(show_id, name):
+        abort(404)
+    return redirect(url_for(".list_assets", show_id=show_id, notice=f"Deleted {name}."))
+
+
+@bp.post("/shows/<show_id>/notes-preview")
+def notes_preview(show_id):
+    """Render Markdown notes exactly as the feed and show page will."""
+    _show_or_404(show_id)
+    data = request.get_json(silent=True) or {}
+    return {"html": _render_notes(show_id, str(data.get("text") or ""))}
+
+
+def _render_notes(show_id: str, text: str) -> str:
+    return render_notes(text, lambda name: assets().url(show_id, name))
 
 
 def _apply_episode_artwork(show_id: str, episode: Episode) -> None:
