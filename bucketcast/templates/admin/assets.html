@@ -1,0 +1,54 @@
+{% extends "admin/base.html" %}
+{% block title %}Assets · {{ show.title }} · Bucketcast{% endblock %}
+{% block content %}
+<div class="muted">
+  <a href="{{ url_for('admin.index') }}">Shows</a> ›
+  <a href="{{ url_for('admin.list_episodes', show_id=show.id) }}">{{ show.title }}</a>
+</div>
+<h1>Assets</h1>
+{% if error %}<div class="error-box">{{ error }}</div>{% endif %}
+
+<form class="card" method="post" enctype="multipart/form-data" style="margin-bottom:18px">
+  <div class="field" style="margin-bottom:10px">
+    <label for="file">Upload an image</label>
+    <input type="file" id="file" name="file" accept="image/jpeg,image/png,image/gif,image/webp" required>
+    <div class="muted">JPEG, PNG, GIF or WebP, up to 10 MB. Any shape. Use these inside episode notes.</div>
+  </div>
+  <button class="btn" type="submit">Upload</button>
+</form>
+
+{% if assets %}
+<ul class="assets">
+  {% for asset in assets %}
+  <li class="card asset">
+    <a href="{{ asset.url }}" target="_blank" rel="noopener"><img src="{{ asset.url }}" alt="" loading="lazy"></a>
+    <div class="asset-name" title="{{ asset.name }}">{{ asset.name }}</div>
+    <div class="muted">{{ asset.size|filesize }}</div>
+    <div class="asset-actions">
+      <button class="btn secondary small copy" type="button" data-copy="{{ asset.markdown }}">Copy for notes</button>
+      <form method="post" action="{{ url_for('admin.delete_asset', show_id=show.id, name=asset.name) }}"
+            onsubmit="return confirm('Delete {{ asset.name }}? Episode notes that use it will show a broken image. This can\'t be undone.')">
+        <button class="btn danger small" type="submit">Delete</button>
+      </form>
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="card"><p style="margin:0">No assets yet. Upload an image, then insert it into an episode's notes.</p></div>
+{% endif %}
+
+<script>
+  document.querySelectorAll('button.copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var text = btn.dataset.copy, label = btn.textContent;
+      var done = function () { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = label; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { window.prompt('Copy this into your notes:', text); });
+      } else {
+        window.prompt('Copy this into your notes:', text);
+      }
+    });
+  });
+</script>
+{% endblock %}

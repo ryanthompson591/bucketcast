@@ -11,6 +11,8 @@
 {% if errors %}<div class="error-box">{{ errors.get('_form') or "Please fix the highlighted fields." }}</div>{% endif %}
 
 <form class="card" method="post" id="episode-form" enctype="multipart/form-data"
+      data-assets-url="{{ url_for('admin.list_assets', show_id=show.id) }}"
+      data-preview-url="{{ url_for('admin.notes_preview', show_id=show.id) }}"
       data-upload-url="{{ url_for('admin.episode_upload_url', show_id=show.id) }}">
   <input type="hidden" name="revision" value="{{ episode.revision }}">
   <input type="hidden" name="audio_path" id="audio_path" value="{{ episode.audio_path }}">
@@ -24,8 +26,14 @@
   </div>
 
   <div class="field">
-    <label for="description">Description / show notes</label>
-    <textarea id="description" name="description">{{ episode.description }}</textarea>
+    <label for="description">Show notes</label>
+    <div class="notes-tools">
+      <button class="btn secondary small" type="button" id="insert-image">Insert image</button>
+      <span class="muted">Markdown: **bold**, *italic*, [link](https://example.com), blank line for a new paragraph.</span>
+    </div>
+    <textarea id="description" name="description" style="min-height:200px">{{ episode.description }}</textarea>
+    <div class="muted" style="margin-top:10px">Preview</div>
+    <div class="notes-preview" id="notes-preview" aria-live="polite">{{ notes_html|safe }}</div>
   </div>
 
   <div class="field">
@@ -95,6 +103,17 @@
     <a class="btn secondary" href="{{ url_for('admin.list_episodes', show_id=show.id) }}">Cancel</a>
   </div>
 </form>
+
+<dialog class="picker" id="asset-picker">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+    <strong>Insert an image</strong>
+    <button class="btn secondary small" type="button" id="picker-close">Close</button>
+  </div>
+  <div class="picker-grid" id="picker-grid"></div>
+  <div class="muted" id="picker-status"></div>
+  <label for="picker-file" style="margin-top:12px">Or upload a new one</label>
+  <input type="file" id="picker-file" accept="image/jpeg,image/png,image/gif,image/webp">
+</dialog>
 
 {% if not is_new %}
 <form method="post" action="{{ url_for('admin.delete_episode', show_id=show.id, episode_id=episode.id) }}" style="margin-top:18px"
@@ -168,6 +187,87 @@
       xhr.send(file);
     });
   }
+
+  // --- notes: live preview and image picker ---
+  var notes = document.getElementById('description');
+  var preview = document.getElementById('notes-preview');
+  var picker = document.getElementById('asset-picker');
+  var grid = document.getElementById('picker-grid');
+  var pickerStatus = document.getElementById('picker-status');
+  var pickerFile = document.getElementById('picker-file');
+  var previewTimer = null, previewSeq = 0;
+
+  function refreshPreview() {
+    var seq = ++previewSeq;
+    fetch(form.dataset.previewUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: notes.value })
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      // The server renders and escapes the notes; ignore out-of-date replies.
+      if (seq === previewSeq) preview.innerHTML = data.html || '';
+    }).catch(function () {});
+  }
+  notes.addEventListener('input', function () {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(refreshPreview, 300);
+  });
+
+  function insertIntoNotes(text) {
+    var start = notes.selectionStart, end = notes.selectionEnd, v = notes.value;
+    var before = v.slice(0, start), after = v.slice(end);
+    // Keep the image in a paragraph of its own.
+    var lead = before && !/\n\n$/.test(before) ? (/\n$/.test(before) ? '\n' : '\n\n') : '';
+    var trail = after && !/^\n\n/.test(after) ? (/^\n/.test(after) ? '\n' : '\n\n') : '';
+    notes.value = before + lead + text + trail + after;
+    var pos = (before + lead + text).length;
+    notes.focus();
+    notes.setSelectionRange(pos, pos);
+    refreshPreview();
+  }
+
+  function addPickerButton(asset) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    var img = document.createElement('img');
+    img.src = asset.url; img.alt = ''; img.loading = 'lazy';
+    var name = document.createElement('span');
+    name.textContent = asset.name;
+    btn.appendChild(img); btn.appendChild(name);
+    btn.addEventListener('click', function () { insertIntoNotes(asset.markdown); picker.close(); });
+    grid.appendChild(btn);
+  }
+
+  document.getElementById('insert-image').addEventListener('click', function () {
+    grid.textContent = '';
+    pickerStatus.textContent = 'Loading…';
+    picker.showModal();
+    fetch(form.dataset.assetsUrl, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        (data.assets || []).forEach(addPickerButton);
+        pickerStatus.textContent = (data.assets || []).length ? '' : 'No images yet. Upload one below.';
+      })
+      .catch(function () { pickerStatus.textContent = 'Could not load the images.'; });
+  });
+  document.getElementById('picker-close').addEventListener('click', function () { picker.close(); });
+
+  pickerFile.addEventListener('change', function () {
+    var file = pickerFile.files[0];
+    if (!file) return;
+    var body = new FormData();
+    body.append('file', file);
+    pickerStatus.textContent = 'Uploading…';
+    fetch(form.dataset.assetsUrl, { method: 'POST', headers: { 'Accept': 'application/json' }, body: body })
+      .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+      .then(function (res) {
+        pickerFile.value = '';
+        if (!res.ok) { pickerStatus.textContent = res.data.error || 'Upload failed.'; return; }
+        insertIntoNotes(res.data.markdown);
+        picker.close();
+      })
+      .catch(function () { pickerStatus.textContent = 'Upload failed.'; });
+  });
 
   form.addEventListener('submit', function (ev) {
     var when = new Date(publishedLocal.value);

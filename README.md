@@ -166,6 +166,16 @@ On Google Cloud, two one-time settings are needed:
      --role="roles/iam.serviceAccountTokenCreator"
    ```
 
+## Show notes and assets
+
+Episode notes are written in Markdown and rendered to HTML wherever they are
+shown. Raw HTML in notes is not passed through; it appears as text.
+
+Each show has an asset library (`shows/<show-id>/assets/`) for images of any
+shape. In the episode form, **Insert image** picks or uploads one and adds it
+to the notes as `![description](asset:file-name.jpg)`. Notes refer to assets
+by name, not by URL, so they keep working if the bucket or domain changes.
+
 ## License
 
 [MIT](LICENSE)

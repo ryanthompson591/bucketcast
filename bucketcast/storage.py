@@ -54,6 +54,14 @@ class Storage:
         """Return ``(size_in_bytes, content_type)``, or ``None`` if missing."""
         raise NotImplementedError
 
+    def list_files(self, prefix: str) -> list[tuple[str, int]]:
+        """``(name, size)`` of the files directly under ``prefix``, sorted by name."""
+        raise NotImplementedError
+
+    def delete(self, path: str) -> None:
+        """Remove an object. Deleting something that isn't there is not an error."""
+        raise NotImplementedError
+
 
 class LocalStorage(Storage):
     """Filesystem-backed storage for local development and tests."""
@@ -127,6 +135,15 @@ class LocalStorage(Storage):
         if not p.is_file():
             return None
         return p.stat().st_size, mimetypes.guess_type(p.name)[0] or "application/octet-stream"
+
+    def list_files(self, prefix):
+        p = self._p(prefix)
+        if not p.is_dir():
+            return []
+        return sorted((c.name, c.stat().st_size) for c in p.iterdir() if c.is_file())
+
+    def delete(self, path):
+        self._p(path).unlink(missing_ok=True)
 
     def write_stream(self, path: str, stream: BinaryIO, length: int) -> int:
         """Copy ``length`` bytes from ``stream`` into ``path``; return bytes written."""
@@ -243,6 +260,19 @@ class GCSStorage(Storage):
         if blob is None:
             return None
         return blob.size, blob.content_type or "application/octet-stream"
+
+    def list_files(self, prefix):
+        prefix = prefix.rstrip("/") + "/"
+        blobs = self._client.list_blobs(self._bucket, prefix=prefix, delimiter="/")
+        return sorted((b.name[len(prefix):], b.size) for b in blobs if b.name != prefix)
+
+    def delete(self, path):
+        from google.api_core.exceptions import NotFound
+
+        try:
+            self._bucket.blob(path).delete()
+        except NotFound:
+            pass
 
 
 def storage_from_config(config: dict) -> Storage:
