@@ -199,6 +199,7 @@ def new_episode(show_id):
         errors = _apply_episode_form(show_id, episode)
         if not errors:
             try:
+                _apply_episode_artwork(show_id, episode)
                 episodes().add(show_id, episode)
                 # TODO(#5, #6): regenerate feed.xml and index.html for this show.
                 return redirect(url_for(".list_episodes", show_id=show_id,
@@ -222,6 +223,7 @@ def edit_episode(show_id, episode_id):
         errors = _apply_episode_form(show_id, episode)
         if not errors:
             try:
+                _apply_episode_artwork(show_id, episode)
                 episodes().update(show_id, episode, revision)
                 return redirect(url_for(".list_episodes", show_id=show_id,
                                         notice=f"Saved “{episode.title}”."))
@@ -248,6 +250,18 @@ def delete_episode(show_id, episode_id):
     return redirect(url_for(
         ".list_episodes", show_id=show_id,
         notice=f"Deleted “{episode.title}”. Its audio file is still in the bucket."))
+
+
+def _apply_episode_artwork(show_id: str, episode: Episode) -> None:
+    """Store a newly chosen episode image, or clear it. May raise ValidationError."""
+    episode.validate(show_id)  # validate before writing any files
+    art = request.files.get("artwork")
+    if art and art.filename:
+        episode.artwork_path = episodes().save_artwork(
+            show_id, episode, art.read(), art.mimetype
+        )
+    elif request.form.get("remove_artwork") == "on":
+        episode.artwork_path = ""
 
 
 def _apply_episode_form(show_id: str, episode: Episode) -> dict:

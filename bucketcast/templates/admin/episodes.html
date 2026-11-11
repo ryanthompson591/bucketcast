@@ -12,16 +12,19 @@
 {% if episodes %}
 <ul class="shows">
   {% for ep in episodes %}
-  <li class="card">
-    <h2 style="font-size:1.05rem;margin:0">
-      <a href="{{ url_for('admin.edit_episode', show_id=show.id, episode_id=ep.id) }}">{{ ep.title }}</a>
-    </h2>
-    <div class="muted">
-      <time class="local-time" datetime="{{ ep.published_at }}">{{ ep.published_at[:10] }}</time>
-      {%- if ep.season %} · Season {{ ep.season }}{% endif %}
-      {%- if ep.number %} · Episode {{ ep.number }}{% endif %}
-      · {{ ep.duration_seconds|duration }} · {{ ep.audio_bytes|filesize }}
-      {%- if ep.explicit %} · Explicit{% endif %}
+  <li class="card show">
+    {# Same fallback podcast apps use: the episode's image, else the show's. #}
+    {% set art = ep.artwork_path or show.artwork_path %}
+    {% if art %}<img src="{{ media_url(art) }}" alt="">{% else %}<div class="ph"></div>{% endif %}
+    <div style="flex:1">
+      <h2><a href="{{ url_for('admin.edit_episode', show_id=show.id, episode_id=ep.id) }}">{{ ep.title }}</a></h2>
+      <div class="muted">
+        <time class="local-time" datetime="{{ ep.published_at }}">{{ ep.published_at[:10] }}</time>
+        {%- if ep.season %} · Season {{ ep.season }}{% endif %}
+        {%- if ep.number %} · Episode {{ ep.number }}{% endif %}
+        · {{ ep.duration_seconds|duration }} · {{ ep.audio_bytes|filesize }}
+        {%- if ep.explicit %} · Explicit{% endif %}
+      </div>
     </div>
   </li>
   {% endfor %}

@@ -1,3 +1,5 @@
+import io
+
 import pytest
 
 from bucketcast import create_app
@@ -300,3 +302,74 @@ def test_local_upload_requires_admin(storage):
 def test_show_pages_link_to_episodes(client):
     assert b"/admin/shows/my-show/episodes" in client.get("/admin/").data
     assert b"/admin/shows/my-show/episodes" in client.get("/admin/shows/my-show").data
+
+
+# --- episode thumbnail -------------------------------------------------------
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+
+
+def publish(client, storage, **form):
+    path = upload(client)
+    r = client.post("/admin/shows/my-show/episodes/new", data=episode_form(path, **form),
+                    content_type="multipart/form-data")
+    return r, EpisodeRepository(storage).list("my-show")
+
+
+def test_episode_without_thumbnail(client, storage):
+    r, (ep,) = publish(client, storage)
+    assert r.status_code == 302 and ep.artwork_path == ""
+
+
+def test_episode_thumbnail_upload(client, storage):
+    r, (ep,) = publish(client, storage, artwork=(io.BytesIO(PNG), "thumb.png", "image/png"))
+    assert r.status_code == 302
+    assert ep.artwork_path.startswith(f"shows/my-show/artwork/episodes/{ep.id}-")
+    assert ep.artwork_path.endswith(".png")
+    assert client.get("/_local_media/" + ep.artwork_path).data == PNG
+    assert ep.artwork_path.encode() in client.get("/admin/shows/my-show/episodes").data
+
+
+def test_episode_thumbnail_wrong_type(client, storage):
+    r, episodes = publish(client, storage, artwork=(io.BytesIO(b"GIF89a"), "x.gif", "image/gif"))
+    assert r.status_code == 200 and b"JPEG or PNG" in r.data
+    assert episodes == []
+
+
+def test_invalid_episode_writes_no_thumbnail(client, storage):
+    r = client.post("/admin/shows/my-show/episodes/new", content_type="multipart/form-data",
+                    data=episode_form("", artwork=(io.BytesIO(PNG), "thumb.png", "image/png")))
+    assert r.status_code == 200
+    assert storage.list_dirs("shows/my-show/artwork") == []
+
+
+def test_edit_keeps_replaces_and_removes_thumbnail(client, storage):
+    _, (ep,) = publish(client, storage, artwork=(io.BytesIO(PNG), "thumb.png", "image/png"))
+    repo = EpisodeRepository(storage)
+    url = f"/admin/shows/my-show/episodes/{ep.id}"
+
+    def save(**form):
+        current = repo.get("my-show", ep.id)
+        r = client.post(url, content_type="multipart/form-data",
+                        data=episode_form(current.audio_path, revision=str(current.revision),
+                                          **form))
+        assert r.status_code == 302, r.data
+        return repo.get("my-show", ep.id)
+
+    assert save(title="Renamed").artwork_path == ep.artwork_path  # untouched
+
+    jpeg = b"\xff\xd8\xff" + b"\x00" * 32
+    replaced = save(artwork=(io.BytesIO(jpeg), "new.jpg", "image/jpeg"))
+    assert replaced.artwork_path.endswith(".jpg")
+    assert client.get("/_local_media/" + replaced.artwork_path).data == jpeg
+
+    assert save(remove_artwork="on").artwork_path == ""
+
+
+def test_list_falls_back_to_show_artwork(client, storage):
+    shows = ShowRepository(storage)
+    show, gen = shows.get("my-show")
+    show.artwork_path = shows.save_artwork(show, PNG, "image/png")
+    shows.save(show, gen)
+    publish(client, storage)
+    assert show.artwork_path.encode() in client.get("/admin/shows/my-show/episodes").data
