@@ -199,6 +199,38 @@ Two settings in the show's form control the layout:
 Links between the generated files are relative, so the same files work at the
 show's own domain and straight from the bucket.
 
+## Custom domains
+
+One app serves every show. A request's `Host` header picks the show whose
+**Domain** setting matches (with or without `www.`), and the app serves that
+show's static files from the bucket:
+
+| Address | Serves |
+|---|---|
+| `https://yourdomain.com/` | the show page |
+| `https://yourdomain.com/page/2/` | older episodes |
+| `https://yourdomain.com/feed.xml` | the RSS feed |
+| `https://yourdomain.com/e/...` | the download-counting redirect |
+
+A show with a domain advertises `https://yourdomain.com/feed.xml` as its feed
+address; that is the one to submit to podcast directories. An address no
+show claims gets a plain "No podcast here" page. The domain-to-show map is
+cached for a minute, so a changed domain takes up to that long to apply.
+
+On Google Cloud each domain is mapped to the App Engine app once, which also
+issues its certificate:
+
+```bash
+gcloud app domain-mappings create yourdomain.com
+gcloud app domain-mappings create www.yourdomain.com
+```
+
+Then add the DNS records the command prints at your registrar.
+
+To try it locally, give a show a domain ending in `.localhost` (for example
+`myshow.localhost`) and open `http://myshow.localhost:5000/`; browsers send
+those names to your own machine.
+
 ## Download stats
 
 Optional, per show. With **Count downloads** on in a show's settings, the
