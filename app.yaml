@@ -1,0 +1,18 @@
+runtime: python313
+# Scales to zero when idle; F1 is the smallest (free-tier) instance class.
+instance_class: F1
+automatic_scaling:
+  min_instances: 0
+  max_instances: 2
+
+env_variables:
+  BUCKETCAST_BUCKET: "your-bucket-name"
+  # From IAP settings: /projects/<project-number>/apps/<project-id>
+  BUCKETCAST_IAP_AUDIENCE: ""
+  # Optional allow-list, comma separated
+  BUCKETCAST_ADMIN_EMAILS: ""
+
+handlers:
+  - url: /.*
+    script: auto
+    secure: always

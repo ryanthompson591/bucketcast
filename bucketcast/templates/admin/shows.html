@@ -1,0 +1,27 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center">
+  <h1>Your shows</h1>
+  <a class="btn" href="{{ url_for('admin.new_show') }}">New show</a>
+</div>
+{% if shows %}
+<ul class="shows">
+  {% for show in shows %}
+  <li class="card show">
+    {% if show.artwork_path %}<img src="{{ artwork_url(show) }}" alt="">{% else %}<div class="ph"></div>{% endif %}
+    <div style="flex:1">
+      <h2><a href="{{ url_for('admin.edit_show', show_id=show.id) }}">{{ show.title }}</a></h2>
+      <div class="muted">
+        {{ show.domain or "No domain yet" }} · {{ show.category }}{% if show.explicit %} · Explicit{% endif %}
+      </div>
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="card">
+  <p>No shows yet. Create your first podcast to get started.</p>
+  <a class="btn" href="{{ url_for('admin.new_show') }}">New show</a>
+</div>
+{% endif %}
+{% endblock %}

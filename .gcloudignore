@@ -1,0 +1,9 @@
+.git/
+.gitignore
+.venv/
+.local-bucket/
+tests/
+.github/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
