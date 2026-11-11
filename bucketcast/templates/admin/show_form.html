@@ -1,0 +1,102 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ "New show" if is_new else show.title }} · Bucketcast{% endblock %}
+{% macro err(name) %}{% if errors.get(name) %}<div class="err">{{ errors[name] }}</div>{% endif %}{% endmacro %}
+{% macro cls(name) %}{% if errors.get(name) %}invalid{% endif %}{% endmacro %}
+{% block content %}
+<h1>{{ "New show" if is_new else "Edit show" }}</h1>
+{% if errors %}<div class="error-box">{{ errors.get('_form') or "Please fix the highlighted fields." }}</div>{% endif %}
+
+<form class="card" method="post" enctype="multipart/form-data">
+  <input type="hidden" name="generation" value="{{ generation }}">
+
+  <div class="field">
+    <label for="title">Title</label>
+    <input type="text" id="title" name="title" value="{{ show.title }}" required class="{{ cls('title') }}">
+    {{ err('title') }}
+  </div>
+
+  <div class="field">
+    <label for="id">Show ID</label>
+    {% if is_new %}
+      <input type="text" id="id" name="id" value="{{ show.id }}" required pattern="[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?"
+             placeholder="my-podcast" class="{{ cls('id') }}">
+      <div class="muted">Lowercase letters, numbers and dashes. Used as the folder name in your bucket and can't be changed later.</div>
+    {% else %}
+      <input type="text" id="id" value="{{ show.id }}" disabled>
+    {% endif %}
+    {{ err('id') }}
+  </div>
+
+  <div class="field">
+    <label for="description">Description</label>
+    <textarea id="description" name="description">{{ show.description }}</textarea>
+  </div>
+
+  <div class="row">
+    <div class="field">
+      <label for="author">Author</label>
+      <input type="text" id="author" name="author" value="{{ show.author }}">
+    </div>
+    <div class="field">
+      <label for="domain">Domain</label>
+      <input type="text" id="domain" name="domain" value="{{ show.domain }}" placeholder="mypodcast.com" class="{{ cls('domain') }}">
+      {{ err('domain') }}
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="field">
+      <label for="owner_name">Owner name</label>
+      <input type="text" id="owner_name" name="owner_name" value="{{ show.owner_name }}">
+    </div>
+    <div class="field">
+      <label for="owner_email">Owner email</label>
+      <input type="email" id="owner_email" name="owner_email" value="{{ show.owner_email }}" class="{{ cls('owner_email') }}">
+      <div class="muted">Appears in the RSS feed; Apple uses it to verify ownership.</div>
+      {{ err('owner_email') }}
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="field">
+      <label for="category">Category</label>
+      <select id="category" name="category" class="{{ cls('category') }}">
+        {% for c in categories %}<option {% if c == show.category %}selected{% endif %}>{{ c }}</option>{% endfor %}
+      </select>
+      {{ err('category') }}
+    </div>
+    <div class="field">
+      <label for="language">Language</label>
+      <input type="text" id="language" name="language" value="{{ show.language }}" placeholder="en" class="{{ cls('language') }}">
+      {{ err('language') }}
+    </div>
+  </div>
+
+  <div class="field check">
+    <input type="checkbox" id="explicit" name="explicit" {% if show.explicit %}checked{% endif %}>
+    <label for="explicit">Explicit content</label>
+  </div>
+
+  <div class="field">
+    <label for="artwork">Artwork</label>
+    {% if show.artwork_path %}
+      <img src="{{ artwork_url(show) }}" alt="Current artwork" style="width:120px;height:120px;border-radius:10px;object-fit:cover;display:block;margin-bottom:8px">
+    {% endif %}
+    <input type="file" id="artwork" name="artwork" accept="image/jpeg,image/png" class="{{ cls('artwork') }}">
+    <div class="muted">Square JPEG or PNG, 1400–3000 px (Apple's requirement).</div>
+    {{ err('artwork') }}
+  </div>
+
+  <div class="actions">
+    <button class="btn" type="submit">{{ "Create show" if is_new else "Save changes" }}</button>
+    <a class="btn secondary" href="{{ url_for('admin.index') }}">Cancel</a>
+  </div>
+</form>
+
+{% if not is_new %}
+<form method="post" action="{{ url_for('admin.delete_show', show_id=show.id) }}" style="margin-top:18px"
+      onsubmit="return confirm('Delete this show? Its files stay in the bucket.')">
+  <button class="btn danger" type="submit">Delete show</button>
+</form>
+{% endif %}
+{% endblock %}

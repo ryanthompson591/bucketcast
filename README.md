@@ -9,8 +9,8 @@ want to stop paying a hosting service per show. At low traffic it should run
 almost entirely inside Google Cloud's free tier, so your main cost is your
 domain names.
 
-> **Status:** planning / pre-alpha. Nothing is built yet. This README describes
-> the intended design.
+> **Status:** pre-alpha. The show admin panel works; episodes, feeds and public
+> pages are in progress (see the [issues](https://github.com/ryanthompson591/bucketcast/issues)).
 
 ## Why
 
@@ -110,6 +110,28 @@ Key design decisions:
 - Jinja2 templates for the feed and pages
 - No JavaScript framework. Plain HTML forms, plus a little JS for direct
   uploads.
+
+## Local development
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+
+# No Google Cloud needed locally: files go to ./.local-bucket, and admin auth is bypassed.
+BUCKETCAST_DEV_AUTH_BYPASS=1 flask --app main run --debug
+# open http://127.0.0.1:5000/admin/
+
+pytest && ruff check .
+```
+
+Configuration (environment variables, set in `app.yaml` for App Engine):
+
+| Variable | Purpose |
+|---|---|
+| `BUCKETCAST_BUCKET` | Cloud Storage bucket name. If unset, uses local storage in `BUCKETCAST_LOCAL_DIR` (default `.local-bucket`). |
+| `BUCKETCAST_IAP_AUDIENCE` | IAP audience (`/projects/<number>/apps/<project-id>`). Admin is locked until this is set. |
+| `BUCKETCAST_ADMIN_EMAILS` | Optional comma-separated allow-list of admin Google accounts. |
+| `BUCKETCAST_DEV_AUTH_BYPASS` | `1` to skip admin auth. **Local development only.** |
 
 ## License
 
