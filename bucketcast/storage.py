@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import shutil
 import tempfile
 from datetime import timedelta
 from pathlib import Path
@@ -67,6 +68,10 @@ class Storage:
 
     def read_bytes(self, path: str) -> bytes | None:
         """The object's contents, or ``None`` if missing. For small files only."""
+        raise NotImplementedError
+
+    def write_file(self, path: str, fileobj: BinaryIO, content_type: str) -> None:
+        """Store a file of any size from an open, readable binary file."""
         raise NotImplementedError
 
     def delete(self, path: str) -> None:
@@ -159,6 +164,18 @@ class LocalStorage(Storage):
     def read_bytes(self, path):
         p = self._p(path)
         return p.read_bytes() if p.is_file() else None
+
+    def write_file(self, path, fileobj, content_type):
+        p = self._p(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=p.parent)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                shutil.copyfileobj(fileobj, f, 1024 * 1024)
+            os.replace(tmp, p)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
 
     def write_stream(self, path: str, stream: BinaryIO, length: int) -> int:
         """Copy ``length`` bytes from ``stream`` into ``path``; return bytes written."""
@@ -298,6 +315,9 @@ class GCSStorage(Storage):
             return self._bucket.blob(path).download_as_bytes()
         except NotFound:
             return None
+
+    def write_file(self, path, fileobj, content_type):
+        self._bucket.blob(path).upload_from_file(fileobj, content_type=content_type, rewind=True)
 
 
 def storage_from_config(config: dict) -> Storage:

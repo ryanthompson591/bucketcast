@@ -113,7 +113,8 @@ episode as new and download the back catalogue again.
 
 Steps:
 
-1. Bring the show's episodes across with their original GUIDs.
+1. Bring the show's episodes across with their original GUIDs, using the
+   importer (see *Importing an existing show* below).
 2. Point the show's domain at Bucketcast (see *Custom domains*) and check
    the new feed at `https://yourdomain.com/feed.xml` in a feed validator.
 3. In the show's settings, put the old feed address in **Previous feed
@@ -130,6 +131,34 @@ Steps:
 If the domain itself is staying the same and only the hosting behind it is
 changing, subscribers keep the same feed address only if the path matches
 too. Otherwise the steps above still apply.
+
+## Importing an existing show
+
+```bash
+python -m bucketcast import --show my-show --feed https://example.com/old/rss --dry-run
+python -m bucketcast import --show my-show --feed https://example.com/old/rss
+```
+
+The importer reads any standard podcast feed (Libsyn's included) and copies
+the show into the bucket, or into `.local-bucket` when no bucket is set:
+
+- **Show**: title, description, author, owner, category, language, explicit
+  flag and artwork. An existing show keeps its own settings.
+- **Episodes**: title, publish date, season and episode numbers, explicit
+  flag, duration, thumbnail, and the audio file itself.
+- **GUIDs are kept exactly**, along with the show's `podcast:guid` if it has
+  one, so subscribers' apps don't download the back catalogue again.
+- **Notes** are converted from HTML to Markdown, and images in them are
+  copied into the show's assets.
+- The old feed's address is saved as the show's *Previous feed address*.
+
+Use `--dry-run` first: it lists what would be imported and changes nothing.
+`--limit N` imports at most N episodes per run, oldest first. Re-running is
+safe; episodes already imported (or imported and then deleted) are skipped,
+and one failed episode doesn't stop the others.
+
+Limits: audio must be MP3 or M4A, and feed items with no audio file (blog or
+video posts) are skipped, since every Bucketcast episode has audio.
 
 ## Tech stack
 

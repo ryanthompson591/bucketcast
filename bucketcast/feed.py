@@ -65,6 +65,8 @@ def _parse(stamp: str) -> datetime:
 
 def podcast_guid(show: Show) -> str:
     """A permanent ID for the show that survives moving the feed to a new URL."""
+    if show.podcast_guid:
+        return show.podcast_guid
     return str(uuid.uuid5(PODCAST_GUID_NAMESPACE, f"bucketcast:{show.id}:{show.created_at}"))
 
 
