@@ -58,6 +58,9 @@ class Show:
     # The feed address at the show's previous host, if it moved here. While
     # set, the feed tells podcast apps that this is its new home.
     previous_feed_url: str = ""
+    # The show's permanent <podcast:guid>. Empty means "derive one"; an
+    # imported show keeps the value its old feed published.
+    podcast_guid: str = ""
     # Show page layout.
     episodes_per_page: int = 30
     full_notes: bool = True
