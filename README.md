@@ -9,8 +9,9 @@ want to stop paying a hosting service per show. At low traffic it should run
 almost entirely inside Google Cloud's free tier, so your main cost is your
 domain names.
 
-> **Status:** pre-alpha. The admin panel can create shows, upload episodes and
-> publish an RSS feed and a show page; deployment is in progress (see the [issues](https://github.com/ryanthompson591/bucketcast/issues)).
+> **Status:** pre-alpha. Every MVP feature is built and tested locally, but
+> Bucketcast has not yet been deployed to Google Cloud. The first deploy is
+> the next step: see the [deployment guide](docs/DEPLOY.md).
 
 ## Why
 
@@ -32,22 +33,22 @@ Bucketcast aims to be the smallest thing that works:
 ## Architecture
 
 ```
-            ┌───────────────────────────────┐
- Admin ───► │ App Engine (Flask)            │
- (you)      │  • admin UI (behind IAP)      │──┐ signed upload URL
-            │  • rebuilds feed.xml + pages  │  │
-            │  • serves static site/feed    │  │
-            └──────────────┬────────────────┘  │
-                           │ read/write        ▼
-            ┌──────────────▼────────────────────────────┐
-            │ Cloud Storage bucket                      │
-            │  shows/<show-id>/                         │
-            │    show.json, episodes.json               │
-            │    feed.xml, index.html                   │
-            │    artwork/…  audio/…                     │
-            └──────────────┬────────────────────────────┘
-                           │ direct download (range requests)
- Listeners / podcast apps ─┘
+ You ───────────► App Engine: ADMIN service (Google sign-in via IAP)
+ (browser)          • admin UI
+    │               • rebuilds feed.xml and the show pages on every save
+    │                        │ read / write
+    │ audio upload           ▼
+    └─────────────► Cloud Storage bucket
+      (signed URL)    shows/<show-id>/
+                        show.json, episodes.json
+                        feed.xml, index.html, page/…
+                        artwork/…  assets/…  audio/…
+                             ▲                    │
+                             │ read               │ audio and artwork,
+                             │                    │ straight from the bucket
+ Listeners ─────► App Engine: PUBLIC service      ▼
+ podcast apps       • show page and feed, by domain      Listeners
+                    • download-counting redirect ──► logs ──► BigQuery
 ```
 
 Key design decisions:
@@ -71,26 +72,25 @@ Key design decisions:
 
 ## MVP scope
 
-- [ ] **Admin UI:** create and edit shows (title, description, artwork,
+- [x] **Admin UI:** create and edit shows (title, description, artwork,
       author, category, language, explicit flag, domain)
-- [ ] **Episode upload:** signed-URL direct upload to Cloud Storage, plus
+- [x] **Episode upload:** signed-URL direct upload to Cloud Storage, plus
       title, description/show notes, publish date, episode/season number
-- [ ] **RSS feed generation:** valid podcast RSS that meets Apple Podcasts
+- [x] **RSS feed generation:** valid podcast RSS that meets Apple Podcasts
       requirements, with iTunes and Podcasting 2.0 namespaces where useful
-- [ ] **Static show site:** a simple homepage per show listing episodes with an
+- [x] **Static show site:** a simple homepage per show listing episodes with an
       HTML5 audio player
-- [ ] **Multi-show routing:** host-header-based routing across custom domains
-- [ ] **Libsyn import:** a CLI that reads an existing RSS feed, copies audio
+- [x] **Multi-show routing:** host-header-based routing across custom domains
+- [x] **Libsyn import:** a CLI that reads an existing RSS feed, copies audio
       and artwork into the bucket, and **preserves episode GUIDs** so
       subscribers don't re-download the back catalog
-- [ ] **Feed migration support:** `<itunes:new-feed-url>` so apps follow you
+- [x] **Feed migration support:** `<itunes:new-feed-url>` so apps follow you
       after you redirect your old feed
-- [ ] **Deploy docs:** step-by-step App Engine, bucket, IAP and custom domain
+- [x] **Deploy docs:** step-by-step App Engine, bucket, IAP and custom domain
       setup
 
 ## Later (maybe)
 
-- Download stats through a tiny logging redirect in front of audio files
 - Scheduled publishing
 - Transcripts and chapters (Podcasting 2.0)
 - Additional storage backends (S3-compatible)
@@ -160,6 +160,12 @@ and one failed episode doesn't stop the others.
 Limits: audio must be MP3 or M4A, and feed items with no audio file (blog or
 video posts) are skipped, since every Bucketcast episode has audio.
 
+## Deploying
+
+[docs/DEPLOY.md](docs/DEPLOY.md) is the step-by-step guide: bucket, the two
+App Engine services, Google sign-in for the admin, custom domains, and
+BigQuery stats, with a checklist to confirm each part works.
+
 ## Tech stack
 
 - Python 3 + Flask on App Engine standard
@@ -204,27 +210,10 @@ the bucket and the duration measured by the browser in
 Locally there is no bucket, so a dev-only route (`/_local_upload/…`) stands in
 for the signed URL and writes into `.local-bucket`.
 
-On Google Cloud, two one-time settings are needed:
-
-1. **Bucket CORS**, so the browser may `PUT` to the bucket from the admin
-   page. Put your admin origin in [`cors.json`](cors.json), then:
-
-   ```bash
-   gcloud storage buckets update gs://YOUR-BUCKET --cors-file=cors.json
-   ```
-
-2. **Permission to sign URLs.** App Engine's service account has no private
-   key, so the app signs through the IAM API. Enable the *IAM Service Account
-   Credentials API* and give the service account the *Service Account Token
-   Creator* role on itself:
-
-   ```bash
-   gcloud services enable iamcredentials.googleapis.com
-   gcloud iam service-accounts add-iam-policy-binding \
-     YOUR-PROJECT@appspot.gserviceaccount.com \
-     --member="serviceAccount:YOUR-PROJECT@appspot.gserviceaccount.com" \
-     --role="roles/iam.serviceAccountTokenCreator"
-   ```
+On Google Cloud, two one-time settings are needed: bucket CORS, so the
+browser may `PUT` to the bucket from the admin page, and permission for the
+app to sign upload links. Both are in the
+[deployment guide](docs/DEPLOY.md).
 
 ## RSS feed
 
@@ -302,14 +291,7 @@ show claims gets a plain "No podcast here" page. The domain-to-show map is
 cached for a minute, so a changed domain takes up to that long to apply.
 
 On Google Cloud each domain is mapped to the App Engine app once, which also
-issues its certificate:
-
-```bash
-gcloud app domain-mappings create yourdomain.com
-gcloud app domain-mappings create www.yourdomain.com
-```
-
-Then add the DNS records the command prints at your registrar.
+issues its certificate. The [deployment guide](docs/DEPLOY.md) has the steps.
 
 To try it locally, give a show a domain ending in `.localhost` (for example
 `myshow.localhost`) and open `http://myshow.localhost:5000/`; browsers send
@@ -338,23 +320,8 @@ download:
 2. A Cloud Logging sink copies those lines into a BigQuery dataset.
 3. The Stats page queries that table.
 
-One-time setup (not yet run against a real project, so check the names as you
-go, in particular the table the sink creates):
-
-```bash
-bq mk --dataset YOUR-PROJECT:bucketcast_logs
-
-gcloud logging sinks create bucketcast-downloads \
-  bigquery.googleapis.com/projects/YOUR-PROJECT/datasets/bucketcast_logs \
-  --log-filter='jsonPayload.event="bucketcast.download"' \
-  --use-partitioned-tables
-```
-
-Then give the sink's writer identity (printed by the command above) the
-*BigQuery Data Editor* role on the dataset, give the app's service account
-*BigQuery Job User* and *BigQuery Data Viewer*, and set
-`BUCKETCAST_STATS_BQ_TABLE` to the table the sink writes to
-(`YOUR-PROJECT.bucketcast_logs.<table>`).
+The dataset, the sink and the permissions are set up once; the
+[deployment guide](docs/DEPLOY.md) has the steps.
 
 Turning counting on puts the app in the download path: if the app is down,
 downloads fail until it is back, whereas direct bucket links keep working.

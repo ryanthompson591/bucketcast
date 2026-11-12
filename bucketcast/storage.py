@@ -246,8 +246,8 @@ class GCSStorage(Storage):
         return blob.generation
 
     def write_bytes(self, path, data, content_type, public=False, cache_control=None):
-        # Public access is granted at the bucket level (see deployment guide),
-        # not per object, so `public` is informational here.
+        # Public access is granted once on the bucket's shows/ folder (see
+        # docs/DEPLOY.md), not per object, so `public` is informational here.
         blob = self._bucket.blob(path)
         if cache_control:
             blob.cache_control = cache_control
