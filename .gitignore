@@ -5,3 +5,8 @@ __pycache__/
 .local-stats/
 .pytest_cache/
 .ruff_cache/
+
+# Your filled-in deploy configs (copied from the *.example.yaml files).
+/app.yaml
+/admin.yaml
+/cors.json

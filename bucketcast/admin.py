@@ -30,7 +30,7 @@ from .feed import FeedBuilder, feed_path, feed_problems
 from .notes import render_notes
 from .shows import CATEGORIES, Show, ShowRepository, ValidationError, normalize_domain
 from .site import SiteBuilder, page_path
-from .stats import StatsStore, since_for, summarize
+from .stats import StatsStore, load_salt, since_for, summarize
 from .storage import Conflict
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -50,8 +50,17 @@ def storage():
 @bp.before_request
 def _guard():
     require_admin()
+    _ensure_stats_salt()
     if request.method == "POST":
         _check_same_origin()
+
+
+def _ensure_stats_salt() -> None:
+    """Create the stats salt if needed. The public service can only read it."""
+    ext = current_app.extensions
+    if not ext.get("bucketcast.salt_ready"):
+        load_salt(storage(), create=True)
+        ext["bucketcast.salt_ready"] = True
 
 
 def _check_same_origin() -> None:

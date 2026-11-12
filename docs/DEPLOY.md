@@ -1,8 +1,9 @@
 # Deploying Bucketcast to Google Cloud
 
-This guide takes you from nothing to a running Bucketcast: a bucket, the
-public and admin services on App Engine, Google sign-in on the admin, your
-own domain, and (optionally) download stats in BigQuery.
+This guide takes you from an empty project to a running Bucketcast: two
+buckets, two narrowly-permissioned service accounts, the public and admin
+services on App Engine, Google sign-in on the admin, your own domain, and
+(optionally) download stats in BigQuery.
 
 > **Status of this guide.** The commands were checked against Google's
 > documentation in November 2026, but the guide as a whole has not yet been
@@ -16,15 +17,54 @@ Prompt and bash alike. Replace the capitalised placeholders:
 | Placeholder | Meaning | Example |
 |---|---|---|
 | `PROJECT_ID` | your Google Cloud project ID | `my-podcasts` |
-| `BUCKET` | a globally unique bucket name | `my-podcasts-media` |
+| `PUBLIC` | bucket for what listeners download | `my-podcasts-public` |
+| `PRIVATE` | bucket for show and episode data | `my-podcasts-private` |
 | `YOU@gmail.com` | the Google account that will administer shows | |
+
+Everything goes in one region. This guide uses `us-central1`, which App
+Engine calls `us-central`.
+
+## The security design
+
+Only what listeners download is public. Everything else is reachable only by
+the app, and each half of the app can do only what it needs.
+
+**Two buckets**
+
+| Bucket | Holds | Who can read it |
+|---|---|---|
+| `PUBLIC` | audio, artwork, images in notes, `feed.xml`, show pages | anyone, by exact address (no browsing) |
+| `PRIVATE` | `show.json`, `episodes.json`, the stats secret | the two service accounts below, and project owners |
+
+The app decides which bucket a file belongs to in one place
+(`is_public_path` in `bucketcast/storage.py`), and anything not explicitly
+listed as public goes to the private bucket.
+
+**Two service accounts, one per service**
+
+| Account | Runs | Can do |
+|---|---|---|
+| `bucketcast-public` | the public service | read objects in both buckets; write logs |
+| `bucketcast-admin` | the admin service | read, write and delete objects in both buckets; sign upload links as itself; query the stats dataset; write logs |
+
+Neither can change a bucket's settings or permissions, create resources, or
+touch anything else in the project. The public service has no write access
+at all, so a flaw in it can't be used to alter a feed or upload a file.
+
+**People**
+
+| Who | Access |
+|---|---|
+| You | project Owner; you deploy |
+| Admins | the admin service only: Google sign-in through IAP, the app's check of IAP's signed token, and the `BUCKETCAST_ADMIN_EMAILS` list must all pass |
+| The public | files in `PUBLIC`, and the public service |
 
 ## What you need
 
-- A Google account and a Google Cloud project **with billing enabled**.
-  Google requires a billing account even for free-tier use.
+- A Google Cloud project **with billing enabled**. Google requires a billing
+  account even for free-tier use.
 - The [`gcloud` command-line tool](https://cloud.google.com/sdk/docs/install),
-  signed in.
+  signed in as a project Owner.
 - This repository checked out.
 
 ```bash
@@ -35,78 +75,130 @@ gcloud auth login
 gcloud config set project PROJECT_ID
 ```
 
-## 1. Create the bucket
-
-Pick `us-central1`, `us-east1` or `us-west1`: Cloud Storage's free tier
-(5 GB of storage and 100 GB of North America egress a month, at the time of
-writing) only applies in those regions. A bucket's location can't be changed
-later.
+Turn on the services Bucketcast uses:
 
 ```bash
-gcloud storage buckets create gs://BUCKET --location=us-central1 --uniform-bucket-level-access
+gcloud services enable appengine.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com iam.googleapis.com iamcredentials.googleapis.com iap.googleapis.com storage.googleapis.com bigquery.googleapis.com logging.googleapis.com
 ```
 
-### Make the `shows/` folder public, and only that folder
-
-Listeners fetch audio, artwork, feeds and pages straight from the bucket, so
-those files must be publicly readable. Everything Bucketcast publishes lives
-under `shows/`. Its private settings (such as the secret used to anonymise
-listener addresses for stats) live under `config/` and must stay private, so
-do **not** make the whole bucket public.
+## 1. Create the two service accounts
 
 ```bash
-gcloud storage managed-folders create gs://BUCKET/shows/
+gcloud iam service-accounts create bucketcast-public --display-name="Bucketcast public service"
 ```
 
 ```bash
-gcloud storage managed-folders add-iam-policy-binding gs://BUCKET/shows --member=allUsers --role=roles/storage.objectViewer
+gcloud iam service-accounts create bucketcast-admin --display-name="Bucketcast admin service"
 ```
 
-This needs uniform bucket-level access (set above) and fails if "public
-access prevention" is enforced on the bucket or by an organisation policy.
-
-Be aware that `shows/` also holds each show's `show.json` and
-`episodes.json`. Those contain what the feed already publishes, plus a few
-things it doesn't: unpublished and deleted episodes' titles and audio paths.
-Don't put anything in a show or episode that you wouldn't want found.
-
-### Allow browser uploads (CORS)
-
-The admin page uploads audio from your browser straight to the bucket. Edit
-[`cors.json`](../cors.json) and replace the placeholder with the address of
-your **admin** service, which you'll know after step 2 (it looks like
-`https://admin-dot-PROJECT_ID.REGION.r.appspot.com`; use the exact address
-`gcloud app deploy` prints, with no trailing slash). Then:
+Let both write logs:
 
 ```bash
-gcloud storage buckets update gs://BUCKET --cors-file=cors.json
+gcloud projects add-iam-policy-binding PROJECT_ID --member="serviceAccount:bucketcast-public@PROJECT_ID.iam.gserviceaccount.com" --role="roles/logging.logWriter" --condition=None
 ```
 
-## 2. Deploy the two services
+```bash
+gcloud projects add-iam-policy-binding PROJECT_ID --member="serviceAccount:bucketcast-admin@PROJECT_ID.iam.gserviceaccount.com" --role="roles/logging.logWriter" --condition=None
+```
 
-Bucketcast runs as two App Engine services from the same code:
+Let the admin account sign upload links as itself. App Engine service
+accounts have no private key, so the app signs through Google's IAM API:
 
-| Service | File | What it serves | Login |
-|---|---|---|---|
-| `default` (public) | `app.yaml` | show pages, feeds, download redirect | none |
-| `admin` | `admin.yaml` | `/admin` | Google sign-in |
+```bash
+gcloud iam service-accounts add-iam-policy-binding bucketcast-admin@PROJECT_ID.iam.gserviceaccount.com --member="serviceAccount:bucketcast-admin@PROJECT_ID.iam.gserviceaccount.com" --role="roles/iam.serviceAccountTokenCreator"
+```
 
-Create the App Engine app once. The region is permanent; pick one near the
-bucket (`gcloud app regions list` shows the valid names, which differ
-slightly from bucket regions, e.g. `us-central`).
+## 2. Create the two buckets
+
+The free tier (5 GB of storage and 100 GB of North America egress a month,
+at the time of writing) applies in `us-central1`, `us-east1` and `us-west1`.
+A bucket's location can't be changed later.
+
+### The private bucket
+
+```bash
+gcloud storage buckets create gs://PRIVATE --location=us-central1 --uniform-bucket-level-access
+```
+
+Enforce public access prevention, so it can never be made public by a later
+mistake:
+
+```bash
+gcloud storage buckets update gs://PRIVATE --public-access-prevention
+```
+
+Grant the two accounts their access to it:
+
+```bash
+gcloud storage buckets add-iam-policy-binding gs://PRIVATE --member="serviceAccount:bucketcast-public@PROJECT_ID.iam.gserviceaccount.com" --role="roles/storage.objectViewer"
+```
+
+```bash
+gcloud storage buckets add-iam-policy-binding gs://PRIVATE --member="serviceAccount:bucketcast-admin@PROJECT_ID.iam.gserviceaccount.com" --role="roles/storage.objectUser"
+```
+
+### The public bucket
+
+```bash
+gcloud storage buckets create gs://PUBLIC --location=us-central1 --uniform-bucket-level-access
+```
+
+```bash
+gcloud storage buckets add-iam-policy-binding gs://PUBLIC --member="serviceAccount:bucketcast-public@PROJECT_ID.iam.gserviceaccount.com" --role="roles/storage.objectViewer"
+```
+
+```bash
+gcloud storage buckets add-iam-policy-binding gs://PUBLIC --member="serviceAccount:bucketcast-admin@PROJECT_ID.iam.gserviceaccount.com" --role="roles/storage.objectUser"
+```
+
+Let anyone fetch a file by its address, without being able to list the
+bucket's contents. `legacyObjectReader` allows reading an object but not
+listing; the more common `objectViewer` would also let anyone browse the
+bucket, which would reveal uploaded-but-unpublished episodes.
+
+```bash
+gcloud storage buckets add-iam-policy-binding gs://PUBLIC --member=allUsers --role=roles/storage.legacyObjectReader
+```
+
+**Unconfirmed:** that this legacy role can be granted on a bucket with
+uniform bucket-level access. If the command is refused, the fallback is
+`--role=roles/storage.objectViewer`, accepting that the bucket can then be
+listed; step 5 has a check that tells you which you ended up with.
+
+### Allow browser uploads to the public bucket (CORS)
+
+The admin page uploads audio from your browser straight to the public
+bucket. Copy `cors.example.json` to `cors.json` and replace the placeholder
+with the address of your **admin** service, which you'll know after step 3
+(it looks like `https://admin-dot-PROJECT_ID.REGION.r.appspot.com`; use the
+exact address `gcloud app deploy` prints, with no trailing slash). Then:
+
+```bash
+gcloud storage buckets update gs://PUBLIC --cors-file=cors.json
+```
+
+## 3. Deploy the two services
+
+Create the App Engine app once. **The region is permanent.**
 
 ```bash
 gcloud app create --region=us-central
 ```
 
-Fill in the settings in both files:
+Copy the two templates. The copies are ignored by git, so your settings
+stay out of the repository:
 
-- **`app.yaml`**: `BUCKETCAST_BUCKET`.
-- **`admin.yaml`**: `BUCKETCAST_BUCKET`, `BUCKETCAST_ADMIN_EMAILS` (your
-  Google account; required), `BUCKETCAST_PUBLIC_BASE_URL` (the public
-  service's address, `https://PROJECT_ID.REGION.r.appspot.com`), and
-  `BUCKETCAST_IAP_AUDIENCE`, which is `/projects/PROJECT_NUMBER/apps/PROJECT_ID`.
-  Get the project number with:
+- `app.example.yaml` → `app.yaml`
+- `admin.example.yaml` → `admin.yaml`
+
+In both, replace `PROJECT_ID` in the `service_account` line and set the two
+bucket names. In `admin.yaml` also set:
+
+- `BUCKETCAST_ADMIN_EMAILS`: your Google account. Required.
+- `BUCKETCAST_PUBLIC_BASE_URL`: the public service's address,
+  `https://PROJECT_ID.REGION.r.appspot.com`.
+- `BUCKETCAST_IAP_AUDIENCE`: `/projects/PROJECT_NUMBER/apps/PROJECT_ID`. Get
+  the number with:
 
 ```bash
 gcloud projects describe PROJECT_ID --format="value(projectNumber)"
@@ -119,27 +211,28 @@ gcloud app deploy app.yaml admin.yaml
 ```
 
 At this point the admin answers "Admin is locked" or "Missing IAP
-assertion" to everyone. That is correct: it stays shut until step 4.
+assertion" to everyone. That is correct: it stays shut until step 5.
 
-### Let the app sign upload links
+### The default App Engine service account
 
-App Engine's service account has no private key, so Bucketcast signs upload
-links through Google's IAM API. Enable that API and let the service account
-sign as itself:
-
-```bash
-gcloud services enable iamcredentials.googleapis.com
-```
+Creating the app also creates `PROJECT_ID@appspot.gserviceaccount.com`.
+Neither Bucketcast service runs as it, but depending on the project it may
+have been given the broad Editor role automatically. Check:
 
 ```bash
-gcloud iam service-accounts add-iam-policy-binding PROJECT_ID@appspot.gserviceaccount.com --member="serviceAccount:PROJECT_ID@appspot.gserviceaccount.com" --role="roles/iam.serviceAccountTokenCreator"
+gcloud projects get-iam-policy PROJECT_ID --flatten="bindings[].members" --filter="bindings.members:PROJECT_ID@appspot.gserviceaccount.com" --format="table(bindings.role)"
 ```
 
-The same service account needs to read and write the bucket. New projects
-normally grant it broad access already; if uploads or saves fail with a
-permission error, grant it *Storage Object Admin* on the bucket.
+If it lists `roles/editor`, that is more access than anything here needs.
+**Unconfirmed:** whether deploys rely on it. The cautious order is: finish
+this guide, then remove the role, deploy again, and put it back if the
+deploy fails.
 
-## 3. Set up Google sign-in (OAuth) for a personal project
+```bash
+gcloud projects remove-iam-policy-binding PROJECT_ID --member="serviceAccount:PROJECT_ID@appspot.gserviceaccount.com" --role="roles/editor"
+```
+
+## 4. Set up Google sign-in (OAuth) for a personal project
 
 Skip this step if your project belongs to a Google Workspace organisation
 and only people in it will sign in.
@@ -153,7 +246,8 @@ before Identity-Aware Proxy (IAP) can be turned on:
    audience, and create it.
 2. Open **APIs & Services → Credentials → Create credentials → OAuth client
    ID**. Choose **Web application**, name it, and create it. Note the client
-   ID and secret.
+   ID and secret. Treat the secret like a password: don't commit it or paste
+   it anywhere but the command in step 5.
 3. Open the client again and add this under **Authorised redirect URIs**,
    with your client ID in place of `CLIENT_ID`:
 
@@ -165,12 +259,12 @@ before Identity-Aware Proxy (IAP) can be turned on:
 added as a test user before you can sign in. If sign-in is refused, add
 yourself under **Audience → Test users**.
 
-## 4. Turn on Identity-Aware Proxy
+## 5. Turn on Identity-Aware Proxy
 
 IAP is switched on for the whole App Engine app, then access is granted per
 service.
 
-Enable it (leave out the two `--oauth2` flags if you skipped step 3):
+Enable it (leave out the two `--oauth2` flags if you skipped step 4):
 
 ```bash
 gcloud iap web enable --resource-type=app-engine --oauth2-client-id=CLIENT_ID --oauth2-client-secret=CLIENT_SECRET
@@ -193,33 +287,57 @@ this exact pair of commands; if the first is refused, set the same access
 in the console under **Security → Identity-Aware Proxy**, on the `default`
 service's row.
 
-The admin is guarded three times over, and all three must pass: IAP's login,
-the app's own check of IAP's signed token, and `BUCKETCAST_ADMIN_EMAILS`. So
-if this step is misconfigured, the failure is a locked admin or a
-login-walled public site, never an open admin.
+If this step is misconfigured, the failure is a locked admin or a
+login-walled public site, never an open admin: the app's own token check and
+allow-list still stand between a visitor and the admin.
 
-## 5. Check it works
+## 6. Check it works, and check it's locked down
 
-Work through these in order. Each one exercises something that has only
-been tested locally so far.
+Work through these in order. Each exercises something that has only been
+tested locally so far.
+
+**Function**
 
 - [ ] `https://PROJECT_ID.REGION.r.appspot.com/healthz` answers `{"ok": true}`
-      with no login (public service is public).
+      with no login.
 - [ ] The admin address asks for a Google sign-in, lets your account in, and
       shows your email in the top corner.
-- [ ] A different Google account is refused.
-- [ ] Create a show with artwork. The artwork displays (bucket writes and
-      public reads work).
+- [ ] Create a show with artwork. The artwork displays.
 - [ ] Upload a large episode, ideally 150 MB or more. The progress bar
-      completes and the episode saves (signed upload links and CORS work).
-      If the upload fails immediately, re-check the origin in `cors.json`.
+      completes and the episode saves. If the upload fails immediately,
+      re-check the origin in `cors.json`.
 - [ ] Upload an asset, insert it into an episode's notes, delete another
-      asset (bucket listing and deletion work).
+      asset.
 - [ ] Open the show page and feed links from the Episodes page. Audio plays.
 - [ ] Run the feed address through a validator such as
       [Podbase](https://podba.se/validate/) or Cast Feed Validator.
 
-## 6. Use your own domain
+**Security.** Open these in a private browser window, signed out:
+
+- [ ] `https://storage.googleapis.com/PRIVATE/shows/SHOW_ID/show.json` is
+      refused (Access Denied). So is `.../episodes.json` and
+      `https://storage.googleapis.com/PRIVATE/config/stats-salt.json`.
+- [ ] `https://storage.googleapis.com/PUBLIC/shows/SHOW_ID/show.json` is Not
+      Found: the data files were never written to the public bucket.
+- [ ] `https://storage.googleapis.com/PUBLIC/` is refused. If it shows a
+      list of files instead, the bucket is listable (you're on the
+      `objectViewer` fallback from step 2).
+- [ ] `https://storage.googleapis.com/PUBLIC/shows/SHOW_ID/feed.xml` loads.
+- [ ] The admin address, signed in as a **different** Google account, is
+      refused.
+- [ ] `https://PROJECT_ID.REGION.r.appspot.com/admin/` (the public service)
+      is Not Found.
+
+And from your terminal, confirm the public service's account cannot write:
+
+```bash
+gcloud storage buckets get-iam-policy gs://PRIVATE --format="table(bindings.role,bindings.members.flatten())"
+```
+
+`bucketcast-public` should appear only against `roles/storage.objectViewer`,
+and `allUsers` should not appear at all.
+
+## 7. Use your own domain
 
 Set the show's **Domain** in its settings, then map the domain to the app.
 Mapping issues a free, automatically renewed certificate.
@@ -240,7 +358,7 @@ The certificate can take several minutes to issue after DNS is in place.
 
 **Unconfirmed:** that a mapped domain goes to the `default` (public) service
 without further configuration. It should, since that is what "default"
-means, but check that `https://yourdomain.com/admin/` returns "Not Found".
+means, but check that `https://yourdomain.com/admin/` returns Not Found.
 
 Afterwards:
 
@@ -250,29 +368,43 @@ Afterwards:
 - [ ] Rebuild the show (Episodes page → Rebuild) so its feed advertises the
       new address.
 
-## 7. Download stats in BigQuery (optional)
+## 8. Download stats in BigQuery (optional)
 
-Create a dataset and a sink that copies Bucketcast's download log lines
-into it. The dataset must exist before the sink.
+Create the dataset in the same region. The expiry (in seconds; this is 400
+days) makes BigQuery drop old download records automatically:
 
 ```bash
-bq mk --dataset PROJECT_ID:bucketcast_logs
+bq --location=us-central1 mk --dataset --default_partition_expiration=34560000 PROJECT_ID:bucketcast_logs
 ```
+
+Create a sink that copies Bucketcast's download log lines into it:
 
 ```bash
 gcloud logging sinks create bucketcast-downloads bigquery.googleapis.com/projects/PROJECT_ID/datasets/bucketcast_logs --log-filter="jsonPayload.event=\"bucketcast.download\"" --use-partitioned-tables
 ```
 
-Give the sink permission to write. Find its identity:
+Three grants, each as narrow as it can be:
 
-```bash
-gcloud logging sinks describe bucketcast-downloads --format="value(writerIdentity)"
-```
+1. **The sink may write to this one dataset.** Find its identity:
 
-and grant that identity **BigQuery Data Editor** on the `bucketcast_logs`
-dataset (console: BigQuery → the dataset → Sharing → Permissions). Give the
-app's service account (`PROJECT_ID@appspot.gserviceaccount.com`) **BigQuery
-Job User** on the project and **BigQuery Data Viewer** on the dataset.
+   ```bash
+   gcloud logging sinks describe bucketcast-downloads --format="value(writerIdentity)"
+   ```
+
+   In the console, open BigQuery → `bucketcast_logs` → **Sharing →
+   Permissions → Add principal**, and give that identity **BigQuery Data
+   Editor**.
+2. **The admin account may read this one dataset.** In the same dialog, give
+   `bucketcast-admin@PROJECT_ID.iam.gserviceaccount.com` **BigQuery Data
+   Viewer**.
+3. **The admin account may run queries.** This one is project-wide, because
+   that is where query jobs are billed:
+
+   ```bash
+   gcloud projects add-iam-policy-binding PROJECT_ID --member="serviceAccount:bucketcast-admin@PROJECT_ID.iam.gserviceaccount.com" --role="roles/bigquery.jobUser" --condition=None
+   ```
+
+The public service gets no BigQuery access. It only writes log lines.
 
 Turn on **Count downloads** for a show, rebuild it, and play an episode
 through the show page. Within about a minute a table appears:
@@ -283,36 +415,44 @@ bq ls bucketcast_logs
 
 **Unconfirmed:** the table's name. By Google's naming rule it should be
 `appengine_googleapis_com_stdout`, but use whatever `bq ls` shows. Put it in
-both `app.yaml` and `admin.yaml` as
-`BUCKETCAST_STATS_BQ_TABLE: "PROJECT_ID.bucketcast_logs.TABLE"` and deploy
-again.
+`admin.yaml` as `BUCKETCAST_STATS_BQ_TABLE: "PROJECT_ID.bucketcast_logs.TABLE"`
+and deploy the admin again.
 
 - [ ] The show's Stats page shows the download you just made. If it shows an
-      error instead, the app's logs have the reason; the likeliest causes
-      are the table name or a missing BigQuery permission.
+      error instead, the admin's logs have the reason; the likeliest causes
+      are the table name or a missing grant above.
+
+What is stored per download: the show, the episode, the time, the app's
+user-agent string, and a salted hash of the listener's IP address. The
+address itself is never logged, and the salt lives in the private bucket.
 
 Counting puts the app in the download path. If you'd rather downloads keep
 working even when the app is down, leave it off; audio then comes straight
 from the bucket and there are no stats.
 
-## 8. Bring over an existing show
+## 9. Bring over an existing show
 
-With `BUCKETCAST_BUCKET` set in your shell, the importer writes straight to
-the bucket. See the README's *Importing an existing show* and *Moving a show
-from another host* for the full procedure.
+The importer runs on your own machine with your own Google credentials and
+writes to the buckets. See the README's *Importing an existing show* and
+*Moving a show from another host* for the full procedure.
+
+```bash
+gcloud auth application-default login
+```
 
 PowerShell:
 
 ```powershell
-$env:BUCKETCAST_BUCKET = "BUCKET"
+$env:BUCKETCAST_PUBLIC_BUCKET = "PUBLIC"; $env:BUCKETCAST_PRIVATE_BUCKET = "PRIVATE"
 ```
 
 ```bash
 python -m bucketcast import --show my-show --feed https://example.com/old/rss --dry-run
 ```
 
-This uses your own Google credentials, so first run
-`gcloud auth application-default login`.
+If the real import is refused with a permission error, grant your own
+account **Storage Object User** on both buckets; project Owner doesn't
+always include reading and writing objects.
 
 - [ ] After a real import, the new feed lists the same GUIDs as the old one.
 
@@ -324,12 +464,12 @@ After pulling new code, deploy both services again:
 gcloud app deploy app.yaml admin.yaml
 ```
 
-Your edits to `app.yaml`, `admin.yaml` and `cors.json` contain your project's
-settings. Keep them out of commits you share, or keep a private copy.
+`app.yaml`, `admin.yaml` and `cors.json` are yours and are ignored by git.
+When the `*.example.*` templates change, compare and carry the changes over.
 
 ## Costs
 
-Both services scale to zero, and the bucket, App Engine, logging and
+Both services scale to zero, and the buckets, App Engine, logging and
 BigQuery all have free tiers that a small show should stay inside. The
 usual first cost is bucket egress once downloads pass about 100 GB a month.
 Set a [budget alert](https://cloud.google.com/billing/docs/how-to/budgets)
@@ -339,14 +479,18 @@ so a surprise can't go unnoticed.
 
 | Symptom | Likely cause |
 |---|---|
+| Deploy fails mentioning the service account | the account in `service_account:` doesn't exist yet (step 1), or its name is mistyped |
 | Admin says "Admin is locked" | `BUCKETCAST_IAP_AUDIENCE` or `BUCKETCAST_ADMIN_EMAILS` is empty in `admin.yaml` |
 | Admin says "Invalid IAP assertion" | the audience has the wrong project number or ID |
 | Admin says "not allowed" | you're signed in with an account not in `BUCKETCAST_ADMIN_EMAILS` |
-| Public pages ask for a Google login | step 4's `allUsers` grant on the `default` service is missing |
-| Upload fails at 0% | `cors.json` origin doesn't exactly match the admin address |
-| "Could not start the upload" | the signing permission in step 2 is missing |
-| Artwork and audio show as broken | the `shows/` folder isn't public (step 1) |
+| Admin shows a server error on every page | `bucketcast-admin` lacks `objectUser` on a bucket (step 2) |
+| Public pages ask for a Google login | step 5's `allUsers` grant on the `default` service is missing |
+| Public pages show "No podcast here" for a real domain | `bucketcast-public` lacks `objectViewer` on the private bucket, or the show's Domain setting doesn't match |
+| Upload fails at 0% | `cors.json` origin doesn't exactly match the admin address, or CORS was set on the wrong bucket |
+| "Could not start the upload" | the signing grant in step 1 is missing |
+| Artwork and audio show as broken | the `allUsers` grant on the public bucket is missing (step 2) |
 | Show page links point at `localhost` or the admin address | `BUCKETCAST_PUBLIC_BASE_URL` isn't set in `admin.yaml`; set it, deploy, and Rebuild |
+| App fails to start: "BUCKETCAST_BUCKET is no longer used" | an old config; set the two bucket variables instead |
 
 Logs for both services:
 

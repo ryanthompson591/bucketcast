@@ -1,7 +1,7 @@
 """Command line: ``python -m bucketcast <command>``.
 
 Commands use the same environment variables as the app, so with
-``BUCKETCAST_BUCKET`` set they act on the bucket, and without it on the local
+the bucket variables set they act on the buckets, and without them on the local
 ``.local-bucket`` folder.
 """
 
@@ -17,10 +17,15 @@ from .storage import storage_from_config
 
 def _import(args: argparse.Namespace) -> int:
     config = load_config()
-    importer = Importer(storage_from_config(config),
+    try:
+        storage = storage_from_config(config)
+    except ValueError as e:
+        print(f"Import stopped: {e}", file=sys.stderr)
+        return 2
+    importer = Importer(storage,
                         base_url=args.base_url or config.get("PUBLIC_BASE_URL", ""))
-    where = f"bucket {config['BUCKET']}" if config.get("BUCKET") else (
-        f"local folder {config['LOCAL_STORAGE_DIR']}")
+    where = (f"buckets {config['PUBLIC_BUCKET']} and {config['PRIVATE_BUCKET']}"
+             if config.get("PUBLIC_BUCKET") else f"local folder {config['LOCAL_STORAGE_DIR']}")
     print(f"Importing into {where}" + (" (dry run)" if args.dry_run else ""))
     try:
         report = importer.run(args.show, args.feed, dry_run=args.dry_run, limit=args.limit)

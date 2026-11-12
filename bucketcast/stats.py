@@ -166,9 +166,16 @@ def summarize(rows: list[Row], days: int | None, today: date | None = None) -> S
     return summary
 
 
-def load_salt(storage: Storage) -> str:
-    """The deployment's IP-hashing salt, created in the bucket on first use."""
+def load_salt(storage: Storage, create: bool = True) -> str | None:
+    """The deployment's IP-hashing salt.
+
+    With ``create`` it is made on first use. The public service passes
+    ``create=False``, because it has read-only access to storage, and gets
+    ``None`` until the admin service has created the salt.
+    """
     data, _ = storage.read_json(SALT_PATH)
+    if not data and not create:
+        return None
     if not data:
         try:
             storage.write_json(SALT_PATH, {"salt": secrets.token_hex(16)}, if_generation_match=0)

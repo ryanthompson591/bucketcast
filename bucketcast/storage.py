@@ -1,10 +1,15 @@
 """Storage backends.
 
 All bucket access goes through a ``Storage`` object so the rest of the app
-never talks to Google Cloud Storage directly. Two backends are provided:
+never talks to Google Cloud Storage directly.
 
-* ``GCSStorage``: production, backed by a Cloud Storage bucket.
+* ``GCSStorage``: one Cloud Storage bucket.
 * ``LocalStorage``: development and tests, backed by a local directory.
+* ``SplitStorage``: production. Two buckets behind one interface: a public
+  one for what listeners download, and a private one for everything else.
+
+Which bucket a path belongs to is decided in one place, ``is_public_path``,
+and anything it doesn't recognise is private.
 
 JSON writes support optimistic concurrency: ``read_json`` returns a
 *generation* token, and passing it back to ``write_json`` makes the write fail
@@ -17,6 +22,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 import shutil
 import tempfile
 from datetime import timedelta
@@ -26,6 +32,20 @@ from typing import Any, BinaryIO
 
 class Conflict(Exception):
     """The object changed (or already exists) since it was read."""
+
+
+# What listeners and podcast apps fetch: a show's media folders, its feed and
+# its pages. Everything else (show.json, episodes.json, config/, and anything
+# added later) is private unless it is listed here.
+_PUBLIC_FOLDER_RE = re.compile(r"^shows/[^/]+/(?:audio|artwork|assets|page)/")
+_PUBLIC_FILE_RE = re.compile(r"^shows/[^/]+/(?:feed\.xml|index\.html)$")
+
+
+def is_public_path(path: str, is_prefix: bool = False) -> bool:
+    """Does ``path`` (or, with ``is_prefix``, the folder it names) hold public files?"""
+    if is_prefix:
+        return bool(_PUBLIC_FOLDER_RE.match(path.rstrip("/") + "/"))
+    return bool(_PUBLIC_FOLDER_RE.match(path) or _PUBLIC_FILE_RE.match(path))
 
 
 class Storage:
@@ -320,7 +340,71 @@ class GCSStorage(Storage):
         self._bucket.blob(path).upload_from_file(fileobj, content_type=content_type, rewind=True)
 
 
+class SplitStorage(Storage):
+    """Two stores behind one interface: public files in one, the rest in another.
+
+    Only the public store is ever exposed to the internet. Settings, episode
+    data and secrets go to the private store, which only the app can read.
+    """
+
+    def __init__(self, public: Storage, private: Storage):
+        self.public = public
+        self.private = private
+
+    def _for(self, path: str, is_prefix: bool = False) -> Storage:
+        return self.public if is_public_path(path, is_prefix) else self.private
+
+    def read_json(self, path):
+        return self._for(path).read_json(path)
+
+    def write_json(self, path, data, if_generation_match=None):
+        return self._for(path).write_json(path, data, if_generation_match)
+
+    def write_bytes(self, path, data, content_type, public=False, cache_control=None):
+        if public and not is_public_path(path):
+            raise ValueError(f"refusing to publish a private path: {path}")
+        self._for(path).write_bytes(path, data, content_type, public=public,
+                                    cache_control=cache_control)
+
+    def write_file(self, path, fileobj, content_type):
+        self._for(path).write_file(path, fileobj, content_type)
+
+    def read_bytes(self, path):
+        return self._for(path).read_bytes(path)
+
+    def object_info(self, path):
+        return self._for(path).object_info(path)
+
+    def delete(self, path):
+        self._for(path).delete(path)
+
+    def list_dirs(self, prefix):
+        return self._for(prefix, is_prefix=True).list_dirs(prefix)
+
+    def list_files(self, prefix):
+        return self._for(prefix, is_prefix=True).list_files(prefix)
+
+    def public_url(self, path):
+        if not is_public_path(path):
+            raise ValueError(f"no public address for a private path: {path}")
+        return self.public.public_url(path)
+
+    def signed_upload_url(self, path, content_type, expires_seconds=3600):
+        if not is_public_path(path):
+            raise ValueError(f"uploads are only accepted for public media: {path}")
+        return self.public.signed_upload_url(path, content_type, expires_seconds)
+
+
 def storage_from_config(config: dict) -> Storage:
+    public, private = config.get("PUBLIC_BUCKET"), config.get("PRIVATE_BUCKET")
     if config.get("BUCKET"):
-        return GCSStorage(config["BUCKET"])
+        raise ValueError(
+            "BUCKETCAST_BUCKET is no longer used. Set BUCKETCAST_PUBLIC_BUCKET (audio, "
+            "artwork, feeds, pages) and BUCKETCAST_PRIVATE_BUCKET (show and episode data).")
+    if public or private:
+        if not (public and private):
+            raise ValueError("Set both BUCKETCAST_PUBLIC_BUCKET and BUCKETCAST_PRIVATE_BUCKET.")
+        if public == private:
+            raise ValueError("The public and private buckets must be different buckets.")
+        return SplitStorage(GCSStorage(public), GCSStorage(private))
     return LocalStorage(config.get("LOCAL_STORAGE_DIR", ".local-bucket"))

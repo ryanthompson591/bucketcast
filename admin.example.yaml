@@ -1,11 +1,16 @@
-# The ADMIN service, reached at https://admin-dot-YOUR-PROJECT.appspot.com
+# The ADMIN service, reached at https://admin-dot-PROJECT_ID.REGION.r.appspot.com
+#
+# Copy to admin.yaml (which git ignores) and fill in the placeholders.
 #
 # Sits behind Identity-Aware Proxy (IAP), which requires a Google sign-in. The
 # app additionally verifies IAP's signed token and checks the account against
 # BUCKETCAST_ADMIN_EMAILS, and stays locked until both settings below are filled
-# in. It contains no public routes. Deploy with: gcloud app deploy admin.yaml
+# in. It contains no public routes.
 runtime: python313
 service: admin
+# Reads and writes objects in the two buckets, signs upload links as itself,
+# and queries the stats dataset. It cannot change bucket settings or access.
+service_account: bucketcast-admin@PROJECT_ID.iam.gserviceaccount.com
 instance_class: F1
 automatic_scaling:
   min_instances: 0
@@ -13,13 +18,14 @@ automatic_scaling:
 
 env_variables:
   BUCKETCAST_ROLE: "admin"
-  BUCKETCAST_BUCKET: "your-bucket-name"
+  BUCKETCAST_PUBLIC_BUCKET: "PROJECT_ID-public"
+  BUCKETCAST_PRIVATE_BUCKET: "PROJECT_ID-private"
   # From IAP: /projects/<project-number>/apps/<project-id>
   BUCKETCAST_IAP_AUDIENCE: ""
   # Required. Comma-separated Google accounts allowed to administer.
   BUCKETCAST_ADMIN_EMAILS: ""
   # Where listeners reach the public service, for shows without their own
-  # domain: https://YOUR-PROJECT.appspot.com
+  # domain: https://PROJECT_ID.REGION.r.appspot.com
   BUCKETCAST_PUBLIC_BASE_URL: ""
   # Optional: the BigQuery table the download-log sink writes to.
   BUCKETCAST_STATS_BQ_TABLE: ""

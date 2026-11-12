@@ -23,7 +23,10 @@ def _env_bool(name: str) -> bool:
 
 def load_config() -> dict:
     return {
-        "BUCKET": os.environ.get("BUCKETCAST_BUCKET", ""),
+        # Two buckets in production: what listeners download, and everything else.
+        "PUBLIC_BUCKET": os.environ.get("BUCKETCAST_PUBLIC_BUCKET", ""),
+        "PRIVATE_BUCKET": os.environ.get("BUCKETCAST_PRIVATE_BUCKET", ""),
+        "BUCKET": os.environ.get("BUCKETCAST_BUCKET", ""),  # retired; rejected if set
         "LOCAL_STORAGE_DIR": os.environ.get("BUCKETCAST_LOCAL_DIR", ".local-bucket"),
         "IAP_AUDIENCE": os.environ.get("BUCKETCAST_IAP_AUDIENCE", ""),
         "ADMIN_EMAILS": [

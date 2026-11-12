@@ -25,7 +25,8 @@ Bucketcast aims to be the smallest thing that works:
 
 - **No containers to manage.** Deploy straight from Python source to App Engine
   standard.
-- **No database server.** Each show's metadata is a JSON file in the bucket.
+- **No database server.** Each show's metadata is a JSON file in a private
+  bucket.
 - **Unlimited shows.** Starting a new podcast means buying a domain, mapping it,
   and clicking "New show."
 - **Scale to zero.** When nobody's uploading or browsing, nothing is running.
@@ -36,20 +37,25 @@ Bucketcast aims to be the smallest thing that works:
  You ───────────► App Engine: ADMIN service (Google sign-in via IAP)
  (browser)          • admin UI
     │               • rebuilds feed.xml and the show pages on every save
-    │                        │ read / write
-    │ audio upload           ▼
-    └─────────────► Cloud Storage bucket
-      (signed URL)    shows/<show-id>/
-                        show.json, episodes.json
-                        feed.xml, index.html, page/…
-                        artwork/…  assets/…  audio/…
-                             ▲                    │
-                             │ read               │ audio and artwork,
-                             │                    │ straight from the bucket
- Listeners ─────► App Engine: PUBLIC service      ▼
- podcast apps       • show page and feed, by domain      Listeners
+    │                   │ read / write            │ read / write
+    │ audio upload      ▼                         ▼
+    │ (signed URL)  PUBLIC bucket             PRIVATE bucket
+    └─────────────► shows/<show-id>/          shows/<show-id>/
+                      audio/…  artwork/…        show.json
+                      assets/…                  episodes.json
+                      feed.xml                config/
+                      index.html, page/…        (stats secret)
+                        ▲        │                ▲
+                        │ read   │ downloads      │ read only
+                        │        ▼                │
+ Listeners ─────► App Engine: PUBLIC service ─────┘
+ podcast apps       • show page and feed, by domain
                     • download-counting redirect ──► logs ──► BigQuery
 ```
+
+Only the public bucket is reachable from the internet. The app decides which
+bucket a file belongs to in one place, and anything not listed there as
+public goes to the private one.
 
 Key design decisions:
 
@@ -140,7 +146,7 @@ python -m bucketcast import --show my-show --feed https://example.com/old/rss
 ```
 
 The importer reads any standard podcast feed (Libsyn's included) and copies
-the show into the bucket, or into `.local-bucket` when no bucket is set:
+the show into the buckets, or into `.local-bucket` when none are set:
 
 - **Show**: title, description, author, owner, category, language, explicit
   flag and artwork. An existing show keeps its own settings.
@@ -162,9 +168,11 @@ video posts) are skipped, since every Bucketcast episode has audio.
 
 ## Deploying
 
-[docs/DEPLOY.md](docs/DEPLOY.md) is the step-by-step guide: bucket, the two
-App Engine services, Google sign-in for the admin, custom domains, and
-BigQuery stats, with a checklist to confirm each part works.
+[docs/DEPLOY.md](docs/DEPLOY.md) is the step-by-step guide: the two
+buckets, the two service accounts and exactly what each may do, the two App
+Engine services, Google sign-in for the admin, custom domains, and BigQuery
+stats. It ends with a checklist that confirms both that it works and that
+it is locked down.
 
 ## Tech stack
 
@@ -187,11 +195,14 @@ BUCKETCAST_DEV_AUTH_BYPASS=1 flask --app main run --debug
 pytest && ruff check .
 ```
 
-Configuration (environment variables, set in `app.yaml` for App Engine):
+Configuration (environment variables; on App Engine they are set in
+`app.yaml` and `admin.yaml`, which you copy from the `*.example.yaml`
+templates):
 
 | Variable | Purpose |
 |---|---|
-| `BUCKETCAST_BUCKET` | Cloud Storage bucket name. If unset, uses local storage in `BUCKETCAST_LOCAL_DIR` (default `.local-bucket`). |
+| `BUCKETCAST_PUBLIC_BUCKET` | Bucket for what listeners download: audio, artwork, images in notes, feeds and pages. |
+| `BUCKETCAST_PRIVATE_BUCKET` | Bucket for show and episode data. Set both buckets, or neither: with neither, everything goes to one local folder, `BUCKETCAST_LOCAL_DIR` (default `.local-bucket`). |
 | `BUCKETCAST_ROLE` | Which half of the app to serve: `public`, `admin`, or `all` (default; both, for local development). |
 | `BUCKETCAST_IAP_AUDIENCE` | IAP audience (`/projects/<number>/apps/<project-id>`). Admin is locked until this is set. |
 | `BUCKETCAST_ADMIN_EMAILS` | Comma-separated Google accounts allowed to administer. **Required**: admin is locked until at least one is listed. |
@@ -201,13 +212,13 @@ Configuration (environment variables, set in `app.yaml` for App Engine):
 
 ## Episode uploads
 
-Audio goes straight from the browser to the bucket. The admin page asks the
+Audio goes straight from the browser to the public bucket. The admin page asks the
 app for a signed URL (valid for one hour), `PUT`s the file to it with a
 progress bar, and then saves the episode. The app records the file's size from
 the bucket and the duration measured by the browser in
 `shows/<show-id>/episodes.json`.
 
-Locally there is no bucket, so a dev-only route (`/_local_upload/…`) stands in
+Locally there are no buckets, so a dev-only route (`/_local_upload/…`) stands in
 for the signed URL and writes into `.local-bucket`.
 
 On Google Cloud, two one-time settings are needed: bucket CORS, so the
@@ -254,6 +265,10 @@ In production the app runs as **two App Engine services from the same code**:
 |---|---|---|---|
 | `default` (public) | `app.yaml` | show pages, feeds, download redirect | none |
 | `admin` | `admin.yaml` | `/admin` | Google sign-in through IAP |
+
+Each runs as its own service account. The public service's account can only
+read the buckets; the admin's can read and write objects in them but can't
+change their settings or permissions.
 
 Identity-Aware Proxy protects whole services, not URL paths, so the admin is
 its own service instead of a path on the public one. Each service only
