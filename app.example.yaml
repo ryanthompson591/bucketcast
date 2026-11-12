@@ -1,0 +1,28 @@
+# The PUBLIC service (App Engine's "default" service).
+#
+# Copy to app.yaml (which git ignores) and fill in the placeholders.
+#
+# Serves show pages, feeds and the download-counting redirect to listeners and
+# podcast apps. It contains no admin routes, and it runs as a service account
+# that can only READ the two buckets. Custom domains map to this service.
+# The admin runs as a second service from the same code: see admin.example.yaml.
+runtime: python313
+# Read-only on both buckets, plus log writing. Nothing else.
+service_account: bucketcast-public@PROJECT_ID.iam.gserviceaccount.com
+# Scales to zero when idle; F1 is the smallest (free-tier) instance class.
+instance_class: F1
+automatic_scaling:
+  min_instances: 0
+  max_instances: 2
+
+env_variables:
+  BUCKETCAST_ROLE: "public"
+  # What listeners download: audio, artwork, feeds, pages.
+  BUCKETCAST_PUBLIC_BUCKET: "PROJECT_ID-public"
+  # Show and episode data. Never public.
+  BUCKETCAST_PRIVATE_BUCKET: "PROJECT_ID-private"
+
+handlers:
+  - url: /.*
+    script: auto
+    secure: always

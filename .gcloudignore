@@ -10,3 +10,7 @@ __pycache__/
 .local-stats/
 docs/
 cors.json
+cors.example.json
+app.example.yaml
+admin.example.yaml
+.claude/

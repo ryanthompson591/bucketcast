@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import secrets
 import time
 
 from flask import Blueprint, Response, abort, current_app, redirect, request
@@ -125,10 +126,27 @@ def site_feed():
 # --- download counting -------------------------------------------------------
 
 def _salt() -> str:
+    """The salt for hashing listener addresses.
+
+    The public service can't write to storage, so it never creates the salt;
+    the admin service does. Until that has happened, a salt that lasts for
+    this process is used: downloads are still counted, just de-duplicated a
+    little less well across restarts.
+    """
     ext = current_app.extensions
-    if "bucketcast.stats_salt" not in ext:
-        ext["bucketcast.stats_salt"] = load_salt(ext["bucketcast.storage"])
-    return ext["bucketcast.stats_salt"]
+    if "bucketcast.stats_salt" in ext:
+        return ext["bucketcast.stats_salt"]
+    can_write = current_app.config.get("ROLE") != "public"
+    salt = load_salt(ext["bucketcast.storage"], create=can_write)
+    if salt is None:
+        if "bucketcast.temp_salt" not in ext:
+            current_app.logger.warning(
+                "No stats salt in storage yet; using a temporary one. Open the admin "
+                "once to create it.")
+            ext["bucketcast.temp_salt"] = secrets.token_hex(16)
+        return ext["bucketcast.temp_salt"]  # not cached as final: look again next time
+    ext["bucketcast.stats_salt"] = salt
+    return salt
 
 
 def _client_ip() -> str:
