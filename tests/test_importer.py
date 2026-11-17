@@ -14,6 +14,7 @@ from bucketcast.importer import (
     Importer,
     format_report,
     guids_in,
+    looks_like_feed,
     parse_date,
     parse_duration,
     parse_feed,
@@ -385,6 +386,81 @@ def test_import_refuses_bad_input(storage, show_id, url, pages, message):
     with pytest.raises(FeedImportError, match=message):
         importer(storage, FakeWeb(pages))[0].run(show_id, url)
     assert storage.list_dirs("shows") == []
+
+
+# --- finding the feed from a website --------------------------------------------
+
+SITE_URL = "https://www.space.example.com/"
+
+
+def _site(html: bytes, **extra):
+    return FakeWeb({**SITE, SITE_URL: html, **extra})
+
+
+def test_website_declaring_its_feed_is_imported(storage):
+    page = (b'<html><head><link rel="alternate" type="application/rss+xml" '
+            b'href="' + FEED_URL.encode() + b'"></head><body>Hi</body></html>')
+    imp, web = importer(storage, _site(page))
+    report = imp.run("space", SITE_URL)
+    assert len(report.imported) == 3
+    assert web.requests[:2] == [SITE_URL, FEED_URL]
+    show, _ = ShowRepository(storage).get("space")
+    # The previous feed address is the feed's, never the website's.
+    assert show.previous_feed_url == "https://rss.old.example.com/shows/1/feed.xml"
+
+
+def test_relative_feed_link_and_bare_domain():
+    page = b'<link rel="alternate" type="application/rss+xml" href="/podcast/rss">'
+    web = FakeWeb({"https://space.example.com": page,
+                   "https://space.example.com/podcast/rss": FEED})
+    url, xml = Importer(LocalStorage("/nonexistent"), opener=web,
+                        log=lambda _: None).find_feed("space.example.com")
+    assert url == "https://space.example.com/podcast/rss" and xml == FEED
+
+
+def test_libsyn_style_site_with_no_feed_link_falls_back_to_slash_rss(storage):
+    page = b"<html><body><h1>Blog</h1><a href='/about'>About</a></body></html>"
+    imp, web = importer(storage, _site(page, **{"https://www.space.example.com/rss": FEED}))
+    report = imp.run("space", SITE_URL)
+    assert len(report.imported) == 3
+    assert "https://www.space.example.com/rss" in web.requests
+
+
+def test_feed_linked_from_the_page_body(storage):
+    page = b'<a href="https://feeds.example.net/12345/rss?x=1">Subscribe (RSS)</a>'
+    imp, _ = importer(storage, _site(page, **{"https://feeds.example.net/12345/rss?x=1": FEED}))
+    assert len(imp.run("space", SITE_URL).imported) == 3
+
+
+def test_candidates_that_are_not_feeds_are_passed_over(storage):
+    page = (b'<link rel="alternate" type="application/rss+xml" href="/comments/rss">'
+            b'<a href="/feed">Feed</a>')
+    imp, _ = importer(storage, _site(page, **{
+        "https://www.space.example.com/comments/rss": b"<html>login</html>",
+        "https://www.space.example.com/feed": FEED}))
+    assert len(imp.run("space", SITE_URL).imported) == 3
+
+
+def test_unverifiable_certificate_points_to_the_host_feed(storage):
+    class BadCertWeb(FakeWeb):
+        def __call__(self, url):
+            raise OSError("<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate "
+                          "verify failed: unable to get local issuer certificate>")
+
+    with pytest.raises(FeedImportError, match=r"space\.example\.com's security certificate"
+                                              r".*libsyn\.com/rss"):
+        importer(storage, BadCertWeb())[0].run("space", "space.example.com")
+
+
+@pytest.mark.parametrize("data,expected", [
+    (FEED, True),
+    (b'\xef\xbb\xbf<?xml version="1.0"?>\n<?xml-stylesheet href="s.xsl"?>\n<!-- hi --><rss>', True),
+    (b"<html><rss></rss></html>", False),
+    (b'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">', False),
+    (b"", False),
+])
+def test_looks_like_feed(data, expected):
+    assert looks_like_feed(data) is expected
 
 
 def test_import_refuses_a_deleted_show(storage):
