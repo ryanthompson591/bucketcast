@@ -22,8 +22,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC
 from email.utils import parsedate_to_datetime
+from html.parser import HTMLParser
 from typing import BinaryIO
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 from .assets import ASSET_TYPES, MAX_ASSET_BYTES, AssetRepository
 from .episodes import AUDIO_TYPES, MAX_AUDIO_BYTES, Episode, EpisodeRepository, new_audio_path
@@ -225,6 +226,72 @@ def parse_feed(xml: bytes) -> ParsedFeed:
     return feed
 
 
+# --- finding the feed from a website address -------------------------------------
+
+FEED_TYPES = ("application/rss+xml", "application/atom+xml", "application/xml", "text/xml")
+# Where hosts commonly put the feed, tried when a page doesn't link to one.
+# Libsyn serves a show's feed at /rss on its own site, custom domains included.
+FALLBACK_FEED_PATHS = ("rss", "feed", "feed.xml", "rss.xml", "podcast.xml")
+_FEEDISH_HREF = re.compile(r"(^|/)(rss|feed|feeds?\.xml|rss\.xml|podcast\.xml)/?$"
+                           r"|//feeds\.|//rss\.|/rss/|/feed/", re.IGNORECASE)
+
+
+def looks_like_feed(data: bytes) -> bool:
+    """True if ``data`` is an RSS document (not necessarily a valid podcast)."""
+    head = data[:2048].lstrip().lower()
+    if head.startswith(b"\xef\xbb\xbf"):
+        head = head[3:].lstrip()
+    # Skip the XML declaration, stylesheet instructions and comments.
+    while head.startswith((b"<?", b"<!--")):
+        end = head.find(b"?>" if head.startswith(b"<?") else b"-->")
+        if end < 0:
+            return False
+        head = head[end + (2 if head.startswith(b"<?") else 3):].lstrip()
+    return head.startswith(b"<rss")
+
+
+class _FeedLinks(HTMLParser):
+    """Collects feed addresses a web page points to, best guesses first."""
+
+    def __init__(self, base: str):
+        super().__init__(convert_charrefs=True)
+        self.base = base
+        self.declared: list[str] = []   # <link rel="alternate" type="application/rss+xml">
+        self.anchors: list[str] = []    # <a href> that looks like a feed
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        a = {k.lower(): (v or "") for k, v in attrs}
+        href = a.get("href", "").strip()
+        if not href:
+            return
+        if tag == "base":
+            self.base = urljoin(self.base, href)
+        elif tag == "link" and "alternate" in a.get("rel", "").lower().split() \
+                and a.get("type", "").lower() in FEED_TYPES:
+            self.declared.append(urljoin(self.base, href))
+        elif tag == "a" and _FEEDISH_HREF.search(href.split("?")[0]):
+            self.anchors.append(urljoin(self.base, href))
+
+
+def feed_candidates(page_url: str, html: bytes) -> list[str]:
+    """Addresses worth trying as the feed for the web page at ``page_url``."""
+    parser = _FeedLinks(page_url)
+    try:
+        parser.feed(html.decode("utf-8", errors="replace"))
+    except Exception:  # noqa: BLE001 - a malformed page just yields fewer candidates
+        pass
+    site = urlparse(page_url)
+    root = f"{site.scheme}://{site.netloc}/"
+    fallbacks = [urljoin(root, p) for p in FALLBACK_FEED_PATHS]
+    seen: set[str] = set()
+    out = []
+    for url in parser.declared + parser.anchors + fallbacks:
+        if url.startswith(("http://", "https://")) and url not in seen:
+            seen.add(url)
+            out.append(url)
+    return out
+
+
 def _filename(url: str, fallback: str) -> str:
     name = unquote(urlparse(url).path.rsplit("/", 1)[-1])
     return name or fallback
@@ -336,6 +403,36 @@ class Importer:
             return None
         return data, mime
 
+    def find_feed(self, url: str) -> tuple[str, bytes]:
+        """Return ``(feed_url, feed_xml)`` for a feed address or a show's website.
+
+        A feed address is used as it is. For a web page, the feed it declares
+        (or links to) is used, and failing that the usual places hosts put one,
+        such as ``/rss`` on a Libsyn site.
+        """
+        url = url.strip()
+        if "://" not in url:
+            url = "https://" + url
+        try:
+            data, _ = self._fetch(url, MAX_FEED_BYTES, "That page")
+        except OSError as e:
+            raise FeedImportError(f"Couldn't download the feed: {e}") from e
+        if looks_like_feed(data):
+            return url, data
+        for candidate in feed_candidates(url, data):
+            if candidate == url:
+                continue
+            try:
+                found, _ = self._fetch(candidate, MAX_FEED_BYTES, "The feed")
+            except (OSError, FeedImportError):
+                continue
+            if looks_like_feed(found):
+                self.log(f"Found the feed at {candidate}")
+                return candidate, found
+        raise FeedImportError(
+            "That address isn't a podcast RSS feed, and no feed could be found from it. "
+            "Paste the show's RSS feed address instead (your old host lists it).")
+
     # -- show --
 
     def _new_show(self, show_id: str, feed: ParsedFeed, feed_url: str, report: Report) -> Show:
@@ -365,10 +462,7 @@ class Importer:
         report = Report(dry_run=dry_run)
         if not ID_RE.match(show_id or ""):
             raise FeedImportError("Show ID must be lowercase letters, numbers and dashes.")
-        try:
-            xml, _ = self._fetch(feed_url, MAX_FEED_BYTES, "The feed")
-        except OSError as e:
-            raise FeedImportError(f"Couldn't download the feed: {e}") from e
+        feed_url, xml = self.find_feed(feed_url)
         feed = parse_feed(xml)
         self.log(f"Feed: {feed.title} ({len(feed.items)} items)")
 

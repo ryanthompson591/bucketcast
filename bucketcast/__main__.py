@@ -46,7 +46,9 @@ def main(argv: list[str] | None = None) -> int:
         description="Copy a show (settings, artwork, episodes, audio, notes) from an "
                     "existing podcast feed, keeping every episode's GUID. Safe to re-run.")
     imp.add_argument("--show", required=True, help="ID for the show here, e.g. my-podcast")
-    imp.add_argument("--feed", required=True, help="address of the existing RSS feed")
+    imp.add_argument("--feed", required=True,
+                     help="the existing RSS feed, or the show's website (its feed is "
+                          "found from the page, e.g. scifimusicalpodcast.com)")
     imp.add_argument("--dry-run", action="store_true",
                      help="list what would be imported without downloading or changing anything")
     imp.add_argument("--limit", type=int, default=None,
