@@ -441,6 +441,17 @@ def test_candidates_that_are_not_feeds_are_passed_over(storage):
     assert len(imp.run("space", SITE_URL).imported) == 3
 
 
+def test_unverifiable_certificate_points_to_the_host_feed(storage):
+    class BadCertWeb(FakeWeb):
+        def __call__(self, url):
+            raise OSError("<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate "
+                          "verify failed: unable to get local issuer certificate>")
+
+    with pytest.raises(FeedImportError, match=r"space\.example\.com's security certificate"
+                                              r".*libsyn\.com/rss"):
+        importer(storage, BadCertWeb())[0].run("space", "space.example.com")
+
+
 @pytest.mark.parametrize("data,expected", [
     (FEED, True),
     (b'\xef\xbb\xbf<?xml version="1.0"?>\n<?xml-stylesheet href="s.xsl"?>\n<!-- hi --><rss>', True),

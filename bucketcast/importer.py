@@ -416,6 +416,13 @@ class Importer:
         try:
             data, _ = self._fetch(url, MAX_FEED_BYTES, "That page")
         except OSError as e:
+            if "CERTIFICATE_VERIFY_FAILED" in str(e):
+                host = urlparse(url).netloc
+                raise FeedImportError(
+                    f"{host}'s security certificate couldn't be verified, so the importer "
+                    "won't read it. This often means the site sends an incomplete "
+                    "certificate chain. Use the feed address from your podcast host "
+                    "instead (for Libsyn: https://YOURSHOW.libsyn.com/rss).") from e
             raise FeedImportError(f"Couldn't download the feed: {e}") from e
         if looks_like_feed(data):
             return url, data
