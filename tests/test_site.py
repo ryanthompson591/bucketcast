@@ -1,3 +1,4 @@
+import io
 from datetime import UTC, datetime
 
 import pytest
@@ -266,3 +267,49 @@ def test_episodes_page_links_to_show_page(client):
     new_show(client, id="other", title="Other", domain="mypodcast.com")
     listing = client.get("/admin/shows/other/episodes").data
     assert b"https://mypodcast.com/feed.xml" in listing and b"Copies in the bucket" in listing
+
+
+# --- banner --------------------------------------------------------------------
+
+def test_banner_replaces_square_artwork_in_the_page_header(storage):
+    (page,) = build(storage, make_show(banner_path="shows/scifi/artwork/banner.png"))
+    assert f'<img class="banner" src="{BASE}/_local_media/shows/scifi/artwork/banner.png"' in page
+    assert 'class="show has-banner"' in page
+    assert f'<img src="{BASE}/_local_media/shows/scifi/artwork/cover.png"' not in page
+    # The square artwork is still the page's share image and icon.
+    cover = f"{BASE}/_local_media/shows/scifi/artwork/cover.png"
+    assert f'<meta property="og:image" content="{cover}">' in page
+
+
+def test_no_banner_keeps_the_square_artwork(storage):
+    (page,) = build(storage)
+    assert 'class="banner"' not in page and 'class="show"' in page
+    assert f'<img src="{BASE}/_local_media/shows/scifi/artwork/cover.png"' in page
+
+
+def test_banner_upload_and_removal_from_the_show_form(client, storage):
+    r = new_show(client, banner=(io.BytesIO(PNG), "banner.png", "image/png"))
+    assert r.status_code == 302
+    show, gen = ShowRepository(storage).get("my-show")
+    assert show.banner_path.startswith("shows/my-show/artwork/banner-")
+    assert client.get("/_local_media/" + show.banner_path).data == PNG
+    assert 'class="banner"' in page(client)
+    assert b'name="remove_banner"' in client.get("/admin/shows/my-show").data
+
+    # Saving without a new file keeps it; ticking "Remove" drops it.
+    base = {"generation": str(gen), "title": "My Show", "category": "Technology",
+            "language": "en"}
+    client.post("/admin/shows/my-show", data=base, content_type="multipart/form-data")
+    show, gen = ShowRepository(storage).get("my-show")
+    assert show.banner_path
+    client.post("/admin/shows/my-show", data={**base, "generation": str(gen),
+                                              "remove_banner": "on"},
+                content_type="multipart/form-data")
+    show, _ = ShowRepository(storage).get("my-show")
+    assert show.banner_path == "" and 'class="banner"' not in page(client)
+
+
+def test_banner_wrong_type(client, storage):
+    r = new_show(client, banner=(io.BytesIO(b"GIF89a"), "x.gif", "image/gif"))
+    assert r.status_code == 200 and b"banner must be a JPEG or PNG" in r.data
+    assert ShowRepository(storage).get("my-show")[0] is None

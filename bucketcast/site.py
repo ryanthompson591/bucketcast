@@ -109,6 +109,7 @@ class SiteBuilder:
                 show=show,
                 description=show.description.strip(),
                 artwork_url=self.feed.media_url(show.artwork_path),
+                banner_url=self.feed.media_url(show.banner_path),
                 canonical_url=self.feed.site_url(show) if number == 1 else "",
                 feed_href=f"{root}feed.xml",
                 feed_url=self.feed.feed_url(show),

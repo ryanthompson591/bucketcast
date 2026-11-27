@@ -556,4 +556,9 @@ def _save(show: Show, generation):
     art = request.files.get("artwork")
     if art and art.filename:
         show.artwork_path = repo().save_artwork(show, art.read(), art.mimetype)
+    banner = request.files.get("banner")
+    if banner and banner.filename:
+        show.banner_path = repo().save_banner(show, banner.read(), banner.mimetype)
+    elif request.form.get("remove_banner") == "on":
+        show.banner_path = ""
     repo().save(show, generation)
