@@ -53,6 +53,9 @@ class Show:
     explicit: bool = False
     domain: str = ""
     artwork_path: str = ""
+    # Optional wide image for the top of the show page, in place of the
+    # square artwork there. The feed always uses the square artwork.
+    banner_path: str = ""
     # Route the feed's audio links through the app so downloads can be counted.
     track_downloads: bool = False
     # The feed address at the show's previous host, if it moved here. While
@@ -158,5 +161,16 @@ class ShowRepository:
         # Timestamped filename so podcast apps and CDNs pick up changes.
         stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
         path = f"{SHOWS_PREFIX}/{show.id}/artwork/cover-{stamp}.{ext}"
+        self.storage.write_bytes(path, data, content_type, public=True)
+        return path
+
+    def save_banner(self, show: Show, data: bytes, content_type: str) -> str:
+        ext = ARTWORK_TYPES.get(content_type)
+        if not ext:
+            raise ValidationError({"banner": "The banner must be a JPEG or PNG image."})
+        if len(data) > MAX_ARTWORK_BYTES:
+            raise ValidationError({"banner": "The banner must be 10 MB or smaller."})
+        stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+        path = f"{SHOWS_PREFIX}/{show.id}/artwork/banner-{stamp}.{ext}"
         self.storage.write_bytes(path, data, content_type, public=True)
         return path

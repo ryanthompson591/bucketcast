@@ -125,6 +125,20 @@
     {{ err('artwork') }}
   </div>
 
+  <div class="field">
+    <label for="banner">Banner (optional)</label>
+    {% if show.banner_path %}
+      <img src="{{ media_url(show.banner_path) }}" alt="Current banner" style="width:100%;max-width:480px;height:auto;border-radius:8px;display:block;margin-bottom:8px">
+      <div class="check" style="margin-bottom:8px">
+        <input type="checkbox" id="remove_banner" name="remove_banner">
+        <label for="remove_banner">Remove the banner</label>
+      </div>
+    {% endif %}
+    <input type="file" id="banner" name="banner" accept="image/jpeg,image/png" class="{{ cls('banner') }}">
+    <div class="muted">A wide JPEG or PNG across the top of the show page, in place of the square artwork there. About 1920 × 480 px works well. Podcast apps still use the square artwork.</div>
+    {{ err('banner') }}
+  </div>
+
   <div class="actions">
     <button class="btn" type="submit">{{ "Create show" if is_new else "Save changes" }}</button>
     <a class="btn secondary" href="{{ url_for('admin.index') }}">Cancel</a>
